@@ -1,0 +1,13 @@
+[package]
+name = "sourcepan"
+version = "0.1.0"
+authors = ["Brendan Molloy <brendan@bbqsrc.net>"]
+
+[dependencies]
+git2 = "0.7"
+chrono = "0.4.4"
+
+[dependencies.gtk]
+version = "0.4.1"
+features = ["v3_22"]
+
