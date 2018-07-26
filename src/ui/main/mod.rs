@@ -2,6 +2,7 @@ mod branch;
 
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
+use std::path::Path;
 
 use git2;
 use gtk::prelude::*;
@@ -11,96 +12,232 @@ use ui::main::branch::{BranchViewable, BranchView};
 
 struct MainPresenter<V> {
     view: RefCell<Weak<V>>,
-    repo: Rc<git2::Repository>
+    repo: RefCell<Rc<git2::Repository>>
 }
 
 pub trait MainViewable {
     fn with_repo(repo: git2::Repository) -> Rc<Self>;
+    fn set_branches(&self, repo: Rc<git2::Repository>, branches: Vec<String>);
     fn show(&self);
+    fn set_title(&self, path: &str);
+    fn open_repo_selector(&self);
 }
 
 impl<V: MainViewable> MainPresenter<V> {
     fn new(repo: git2::Repository) -> MainPresenter<V> {
         MainPresenter {
             view: RefCell::new(Weak::new()),
-            repo: Rc::new(repo)
+            repo: RefCell::new(Rc::new(repo))
         }
+    }
+
+    fn view(&self) -> Rc<V> {
+        self.view.borrow()
+            .upgrade()
+            .expect("Presenter only running while view still exists")
+    }
+
+    fn open_clicked(&self) {
+        self.view().open_repo_selector();
+    }
+
+    fn select_repo(&self, repo_dir: &Path) {
+        use Config;
+
+        let repo = git2::Repository::open(&repo_dir).unwrap();
+        *self.repo.borrow_mut() = Rc::new(repo);
+
+        Config::set_repo_dir(&repo_dir.to_string_lossy());
+        
+        // Reset everything
+        self.start();
+    }
+
+    fn update_branches(&self) {
+        let repo = self.repo.borrow();
+        let mut names = vec![];
+        for entry in repo.branches(Some(git2::BranchType::Local)).unwrap().into_iter() {
+            let (branch, _) = entry.unwrap();
+            let name = branch.name().unwrap().unwrap();
+            names.push(name.to_string());
+        }
+        self.view().set_branches(repo.clone(), names);
+    }
+
+    fn start(&self) {
+        let repo = self.repo.borrow();
+        let path = repo.path().parent().unwrap().to_string_lossy();
+        self.view().set_title(&path);
+
+        self.update_branches();
     }
 }
 
 impl MainViewable for MainWindow {
     fn with_repo(repo: git2::Repository) -> Rc<Self> {
-        let (window, stack) = MainWindow::create();
-
+        let (window, header) = MainWindow::create();
 
         let view = Rc::new(MainWindow {
             presenter: MainPresenter::new(repo),
-            sidebar_stack: stack,
+            header: header,
             window: window
         });
 
-        // TODO move
-        {
-            let repo = view.presenter.repo.clone();
-            for entry in repo.branches(Some(git2::BranchType::Local)).unwrap().into_iter() {
-                let (branch, _) = entry.unwrap();
-                let name = branch.name().unwrap().unwrap();
-                let branch_view = BranchView::new(view.presenter.repo.clone(), name.to_string());
-                &view.sidebar_stack.add_titled(branch_view.widget(), &format!("branch-{}", name), name);
-            }
-        }
-
         *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
 
+        let weak_view = view.clone();
+        view.header.open_button.connect_clicked(move |_| {
+            weak_view.presenter.open_clicked();
+        });
+
+        view.presenter.start();
+
         view
+    }
+    
+    fn set_branches(&self, repo: Rc<git2::Repository>, branches: Vec<String>) {
+        let stack = MainWindow::create_sidebar(&self.window);
+
+        for name in branches.into_iter() {
+            let branch_view = BranchView::new(repo.clone(), name.to_string());
+            &stack.add_titled(branch_view.widget(), &format!("branch-{}", name), &name);
+        }
+
+        self.window.show_all();
+    }
+
+    fn open_repo_selector(&self) {
+        let dialog = gtk::FileChooserNative::new(
+            Some("Select Repository"),
+            Some(&self.window),
+            gtk::FileChooserAction::SelectFolder,
+            Some("_Open"),
+            Some("_Cancel"));
+        
+        let result = dialog.run();
+
+        if result == gtk::ResponseType::Accept.into() {
+            if let Some(filename) = dialog.get_filename() {
+                self.presenter.select_repo(&filename);
+            }
+        }
     }
 
     fn show(&self) {
         self.window.show_all();
     }
+
+    fn set_title(&self, path: &str) {
+        self.window.set_title(path);
+        self.header.widget().set_title(path);
+    }
 }
 
 pub struct MainWindow {
     presenter: MainPresenter<MainWindow>,
-    sidebar_stack: gtk::Stack,
+    header: MainWindowHeader,
     window: gtk::Window
 }
 
+struct MainWindowHeader {
+    root: gtk::HeaderBar,
+    open_button: gtk::Button
+}
+
+impl MainWindowHeader {
+    fn widget(&self) -> &gtk::HeaderBar {
+        &self.root
+    }
+}
+
 impl MainWindow {
-    fn create() -> (gtk::Window, gtk::Stack) {
-        let window = gtk::Window::new(gtk::WindowType::Toplevel);
-        window.set_title("Sourcepan");
-        window.set_default_size(1024, 768);
+    fn create_sidebar(window: &gtk::Window) -> gtk::Stack {
+        // Remove the entire grid and recreate if exists.
+        if let Some(child) = window.get_children().first() {
+            if let Some(name) = <gtk::Widget as WidgetExt>::get_name(child) {
+                if name == "GtkGrid" {
+                    window.remove(child);
+                }
+            }
+        }
 
-        let header_bar = gtk::HeaderBar::new();
-        header_bar.set_title("Sourcepan");
-        header_bar.set_show_close_button(true);
-
-        let fetch_button = gtk::Button::new_with_label("Fetch");
-        let settings_button = gtk::Button::new_with_label("Preferences");
-        header_bar.pack_end(&settings_button);
-        header_bar.pack_start(&fetch_button);
-
-        window.set_titlebar(&header_bar);
-
-        let main_box = gtk::Grid::new();
-
-        window.add(&main_box);
-        
         let sidebar = gtk::StackSidebar::new();
-        main_box.attach(&sidebar, 0, 0, 1, 1);
+        let main_box = gtk::Grid::new();
 
         let stack = gtk::Stack::new();
         stack.set_vexpand(true);
         stack.set_hexpand(true);
         sidebar.set_stack(&stack);
+
+        main_box.attach(&sidebar, 0, 0, 1, 1);
         main_box.attach(&stack, 1, 0, 1, 1);
+        
+        window.add(&main_box);
+        
+        stack
+    }
+
+    fn create_header() -> MainWindowHeader {
+        let header_bar = gtk::HeaderBar::new();
+        header_bar.set_title("Sourcepan");
+        header_bar.set_show_close_button(true);
+
+        let commit_button = gtk::Button::new_with_label("Commit");
+
+        let action_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        action_box.get_style_context().unwrap().add_class("linked");
+
+        let pull_button = gtk::Button::new_with_label("Pull");
+        let push_button = gtk::Button::new_with_label("Push");
+        let fetch_button = gtk::Button::new_with_label("Fetch");
+
+        action_box.add(&pull_button);
+        action_box.add(&push_button);
+        action_box.add(&fetch_button);
+
+        let action_box2 = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        action_box2.get_style_context().unwrap().add_class("linked");
+
+        let branch_button = gtk::Button::new_with_label("Branch");
+        let merge_button = gtk::Button::new_with_label("Merge");
+
+        action_box2.add(&branch_button);
+        action_box2.add(&merge_button);
+
+        header_bar.pack_start(&commit_button);
+        header_bar.pack_start(&action_box);
+        header_bar.pack_start(&action_box2);
+
+        let stash_button = gtk::Button::new_with_label("Stash");
+        header_bar.pack_start(&stash_button);
+
+        let settings_button = gtk::Button::new_with_label("Preferences");
+        header_bar.pack_end(&settings_button);
+
+        let open_button = gtk::Button::new_with_label("Open");
+        header_bar.pack_end(&open_button);
+
+        MainWindowHeader {
+            root: header_bar,
+            open_button: open_button
+        }
+    }
+
+    fn create() -> (gtk::Window, MainWindowHeader) {
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.set_title("Sourcepan");
+        window.set_default_size(1024, 768);
+
+        let header = MainWindow::create_header();
+        window.set_titlebar(header.widget());
+
+        let _ = MainWindow::create_sidebar(&window);
 
         window.connect_delete_event(|_, _| {
             gtk::main_quit();
             Inhibit(false)
         });
 
-        (window, stack)
+        (window, header)
     }
 }

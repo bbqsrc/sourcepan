@@ -28,8 +28,12 @@ impl<V: InitViewable> InitPresenter<V> {
     }
 
     fn select_repo(&self, repo_dir: &Path) {
+        use Config;
+
         let repo = git2::Repository::open(&repo_dir).unwrap();
         self.view().open_main_window_with(repo);
+
+        Config::set_repo_dir(&repo_dir.to_string_lossy());
     }
 }
 
@@ -75,11 +79,11 @@ impl InitViewable for InitWindow {
 
         *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
 
-        let weak_view = Rc::downgrade(&view);
+        let weak_view = view.clone();//Rc::downgrade(&view);
         open_button.connect_clicked(move |_| {
-            if let Some(v) = weak_view.upgrade() {
-                v.presenter.click_open();
-            }
+            // if let Some(v) = weak_view.upgrade() {
+                weak_view.presenter.click_open();
+            // }
         });
 
         view
