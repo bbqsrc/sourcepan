@@ -2,6 +2,8 @@ extern crate gtk;
 extern crate git2;
 extern crate chrono;
 extern crate preferences;
+extern crate notify;
+extern crate glib;
 
 use preferences::{AppInfo, Preferences, PreferencesMap};
 

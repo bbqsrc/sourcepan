@@ -1,8 +1,10 @@
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::cmp::min;
-use std::collections::HashMap;
+use std::sync::mpsc::{channel, TryRecvError};
+use std::time::Duration;
 
+use notify::{DebouncedEvent, RecommendedWatcher, Watcher, RecursiveMode};
 use chrono::{self, TimeZone};
 use git2;
 use gtk::prelude::*;
@@ -58,10 +60,11 @@ impl<V: BranchViewable> BranchPresenter<V> {
     fn on_uncommitted_changes_selected(&self) {
         let repo_head_tree = self.repo.head().unwrap().peel_to_tree().unwrap();
         let mut diff_opts = git2::DiffOptions::new();
-        diff_opts.include_untracked(true)
+        diff_opts
+            .include_untracked(true)
             .recurse_untracked_dirs(true);
 
-        let mut workdir_diff = self.repo.diff_tree_to_workdir(Some(&repo_head_tree), Some(&mut diff_opts)).unwrap();
+        let mut workdir_diff = self.repo.diff_tree_to_workdir_with_index(Some(&repo_head_tree), Some(&mut diff_opts)).unwrap();
         workdir_diff.find_similar(None).unwrap();
 
         let mut index_diff = self.repo.diff_tree_to_index(Some(&repo_head_tree), None, None).unwrap();
@@ -81,7 +84,9 @@ impl<V: BranchViewable> BranchPresenter<V> {
                 path: d.new_file().path().unwrap().to_string_lossy().to_string(),
                 delta: d.status()
             }
-        }).collect();
+        })
+        .filter(|x| !index_deltas.iter().any(|y| x.id == y.id))
+        .collect();
 
         self.view().set_staged_statuses(&index_deltas);
         self.view().set_unstaged_statuses(&workdir_deltas);
@@ -141,8 +146,7 @@ pub struct BranchView {
 
 trait FileStatusViewable {
     fn new() -> Rc<Self>;
-    fn update_list(&self, statuses: &[&git2::StatusEntry], is_editable: bool);
-    fn update_list2(&self, statuses: &[TreeItem]);
+    fn update_list(&self, statuses: &[TreeItem]);
 }
 
 struct FileStatusPresenter<V> {
@@ -162,12 +166,8 @@ impl<V: FileStatusViewable> FileStatusPresenter<V> {
             .expect("Presenter only running while view still exists")
     }
 
-    fn set_statuses(&self, statuses: &[&git2::StatusEntry]) {
-        self.view().update_list(statuses, false);
-    }
-
     fn set_history_statuses(&self, statuses: &[TreeItem]) {
-        self.view().update_list2(statuses);
+        self.view().update_list(statuses);
     }
 }
 
@@ -192,18 +192,7 @@ impl FileStatusViewable for FileStatusView {
         view
     }
 
-    fn update_list(&self, statuses: &[&git2::StatusEntry], is_editable: bool) {
-        self.status_list_store.clear();
-
-        for entry in statuses.iter() {
-            self.status_list_store.insert_with_values(None, &[0, 1], &[
-                &format!("{:?}", entry.status()),
-                &entry.path().unwrap()
-            ]);
-        }
-    }
-
-    fn update_list2(&self, statuses: &[TreeItem]) {
+    fn update_list(&self, statuses: &[TreeItem]) {
         self.status_list_store.clear();
 
         for entry in statuses.iter() {
@@ -270,20 +259,80 @@ impl GitStatusExt for git2::Status {
 trait HistoryViewable {
     fn new(parent: Weak<BranchPresenter<BranchView>>) -> Rc<Self>;
     fn set_history(&self, commits: &[CommitInfo]);
+    fn selected_row(&self) -> Option<usize>;
 }
 
 struct HistoryPresenter<V> {
     parent: Weak<BranchPresenter<BranchView>>,
     view: RefCell<Weak<V>>,
-    commits: RefCell<Vec<CommitInfo>>
+    commits: RefCell<Vec<CommitInfo>>,
+    watcher: RefCell<RecommendedWatcher>
 }
 
-impl<V: HistoryViewable> HistoryPresenter<V> {
-    fn new(parent: Weak<BranchPresenter<BranchView>>) -> HistoryPresenter<V> {
-        HistoryPresenter {
+impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
+    fn new(parent: Weak<BranchPresenter<BranchView>>) -> Rc<HistoryPresenter<V>> {
+        let (tx, rx) = channel();
+
+        let presenter = Rc::new(HistoryPresenter {
             parent: parent,
             view: RefCell::new(Weak::new()),
-            commits: RefCell::new(vec![])
+            commits: RefCell::new(vec![]),
+            watcher: RefCell::new(Watcher::new(tx, Duration::from_secs(2)).unwrap())
+        });
+
+        let weak_presenter = Rc::downgrade(&presenter);
+
+        gtk::idle_add(move || {
+            match rx.try_recv() {
+                Err(err) => {
+                    match err {
+                        TryRecvError::Empty => gtk::Continue(true),
+                        TryRecvError::Disconnected => {
+                            gtk::Continue(false)
+                        }
+                    }
+                },
+                Ok(v) => {
+                    match weak_presenter.upgrade() {
+                        Some(p) => {
+                            p.on_path_change_event(v);
+                            gtk::Continue(true)
+                        },
+                        None => {
+                            gtk::Continue(false)
+                        }
+                    }
+                }
+            }
+        });
+
+        presenter
+    }
+
+    fn on_path_change_event(&self, event: DebouncedEvent) {
+        let maybe_path = match event {
+            DebouncedEvent::NoticeWrite(path) => Some(path),
+            DebouncedEvent::NoticeRemove(path) => Some(path),
+            DebouncedEvent::Create(path) => Some(path),
+            DebouncedEvent::Write(path) => Some(path),
+            DebouncedEvent::Chmod(path) => Some(path),
+            DebouncedEvent::Remove(path) => Some(path),
+            DebouncedEvent::Rename(_, new_path) => Some(new_path),
+            DebouncedEvent::Rescan => None,
+            DebouncedEvent::Error(_, maybe_path) => maybe_path
+        };
+
+        let path = match maybe_path {
+            Some(v) => v,
+            None => return
+        };
+
+        let parent = self.parent();
+        if path.ends_with("index") || path.ends_with(&parent.branch) || !path.components().any(|x| x.as_os_str() == ".git") {
+            self.load_commit_history();
+            if let Some(idx) = self.view().selected_row() {
+                self.on_item_selected(idx);
+            }
         }
     }
 
@@ -354,12 +403,8 @@ impl<V: HistoryViewable> HistoryPresenter<V> {
         self.view().set_history(&self.commits.borrow());
     }
 
-    fn on_item_selected(&self, index: i32) {
-        if index < 0 {
-            return;
-        }
-
-        let info = &self.commits.borrow()[index as usize];
+    fn on_item_selected(&self, index: usize) {
+        let info = &self.commits.borrow()[index];
 
         if info.is_sentinel() {
             self.parent().on_uncommitted_changes_selected();
@@ -370,11 +415,16 @@ impl<V: HistoryViewable> HistoryPresenter<V> {
 
     fn start(&self) {
         self.load_commit_history();
+        let parent = self.parent();
+
+        self.watcher.borrow_mut()
+            .watch(parent.repo.path().parent().unwrap(), RecursiveMode::Recursive)
+            .unwrap();
     }
 }
 
 struct HistoryView {
-    presenter: HistoryPresenter<HistoryView>,
+    presenter: Rc<HistoryPresenter<HistoryView>>,
     list_store: gtk::ListStore,
     tree: gtk::TreeView,
     root: gtk::ScrolledWindow
@@ -434,12 +484,11 @@ impl HistoryViewable for HistoryView {
 
         *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
 
+        // TODO: this should be weak
         let cloned_view = Rc::clone(&view);
-        view.tree.connect_cursor_changed(move |this| {
-            if let Some(path) = this.get_cursor().0 {
-                if let Some(idx) = path.get_indices().first() {
-                    cloned_view.presenter.on_item_selected(*idx);
-                }
+        view.tree.connect_cursor_changed(move |_| {
+            if let Some(idx) = cloned_view.selected_row() {
+                cloned_view.presenter.on_item_selected(idx);
             }
         });
 
@@ -448,7 +497,19 @@ impl HistoryViewable for HistoryView {
         view
     }
 
+    fn selected_row(&self) -> Option<usize> {
+        if let Some(path) = self.tree.get_cursor().0 {
+            if let Some(idx) = path.get_indices().first() {
+                return Some(*idx as usize);
+            }
+        }
+
+        None
+    }
+
     fn set_history(&self, commits: &[CommitInfo]) {
+        let cursor = self.tree.get_cursor();
+
         self.list_store.clear();
 
         for commit in commits {
@@ -458,6 +519,15 @@ impl HistoryViewable for HistoryView {
                 &commit.author,
                 &commit.commit_date
             ]);
+        }
+
+        let col = match cursor.1 {
+            Some(ref v) => Some(v),
+            None => None
+        };
+
+        if let Some(path) = cursor.0 {
+            self.tree.set_cursor(&path, col, false);
         }
     }
 }
