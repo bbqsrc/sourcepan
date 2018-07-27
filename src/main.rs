@@ -1,21 +1,33 @@
 extern crate gtk;
 extern crate git2;
 extern crate chrono;
+extern crate preferences;
+
+use preferences::{AppInfo, Preferences, PreferencesMap};
 
 mod ui;
 
 use ui::init::InitViewable;
 use ui::main::MainViewable;
 
+const APP_INFO: AppInfo = AppInfo { name: "Sourcepan", author: "Brendan Molloy" };
+
 pub struct Config;
 
 impl Config {
     fn set_repo_dir(repo_dir: &str) {
-        // TODO
+        let mut map: PreferencesMap<String> = PreferencesMap::new();
+        map.insert("repo_dir".into(), repo_dir.into());
+        map.save(&APP_INFO, "app").unwrap();
     }
 
-    fn repo_dir<'a>() -> Option<&'a str> {
-        None
+    fn repo_dir() -> Option<String> {
+        let map = PreferencesMap::<String>::load(&APP_INFO, "app");
+
+        match map {
+            Ok(m) => Some(m["repo_dir"].clone()),
+            Err(_) => None
+        }
     }
 }
 
