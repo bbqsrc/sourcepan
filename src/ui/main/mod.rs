@@ -61,7 +61,7 @@ impl<V: MainViewable> MainPresenter<V> {
             let name = branch.name().unwrap().unwrap();
             names.push(name.to_string());
         }
-        self.view().set_branches(repo.clone(), names);
+        self.view().set_branches(Rc::clone(&repo), names);
     }
 
     fn start(&self) {
@@ -80,14 +80,15 @@ impl MainViewable for MainWindow {
         let view = Rc::new(MainWindow {
             presenter: MainPresenter::new(repo),
             header: header,
-            window: window
+            window: window,
+            branch_views: RefCell::new(vec![])
         });
 
         *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
 
-        let weak_view = view.clone();
+        let cloned_view = Rc::clone(&view);
         view.header.open_button.connect_clicked(move |_| {
-            weak_view.presenter.open_clicked();
+            cloned_view.presenter.open_clicked();
         });
 
         view.presenter.start();
@@ -97,11 +98,15 @@ impl MainViewable for MainWindow {
     
     fn set_branches(&self, repo: Rc<git2::Repository>, branches: Vec<String>) {
         let stack = MainWindow::create_sidebar(&self.window);
+        let mut branch_views = vec![];
 
         for name in branches.into_iter() {
-            let branch_view = BranchView::new(repo.clone(), name.to_string());
+            let branch_view = BranchView::new(Rc::clone(&repo), name.to_string());
             &stack.add_titled(branch_view.widget(), &format!("branch-{}", name), &name);
+            branch_views.push(branch_view);
         }
+
+        *self.branch_views.borrow_mut() = branch_views;
 
         self.window.show_all();
     }
@@ -116,7 +121,7 @@ impl MainViewable for MainWindow {
         
         let result = dialog.run();
 
-        if result == gtk::ResponseType::Accept.into() {
+        if result == -3 { // gtk::ResponseType::Accept.into() {
             if let Some(filename) = dialog.get_filename() {
                 self.presenter.select_repo(&filename);
             }
@@ -136,7 +141,8 @@ impl MainViewable for MainWindow {
 pub struct MainWindow {
     presenter: MainPresenter<MainWindow>,
     header: MainWindowHeader,
-    window: gtk::Window
+    window: gtk::Window,
+    branch_views: RefCell<Vec<Rc<BranchView>>>
 }
 
 struct MainWindowHeader {

@@ -79,7 +79,7 @@ impl InitViewable for InitWindow {
 
         *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
 
-        let weak_view = view.clone();//Rc::downgrade(&view);
+        let weak_view = Rc::clone(&view); //Rc::downgrade(&view);
         open_button.connect_clicked(move |_| {
             // if let Some(v) = weak_view.upgrade() {
                 weak_view.presenter.click_open();
@@ -107,7 +107,7 @@ impl InitViewable for InitWindow {
         
         let result = dialog.run();
 
-        if result == gtk::ResponseType::Accept.into() {
+        if result == -3 { // gtk::ResponseType::Accept.into() {
             if let Some(filename) = dialog.get_filename() {
                 self.presenter.select_repo(&filename);
             }

@@ -1,23 +1,49 @@
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::cmp::min;
+use std::collections::HashMap;
 
 use chrono::{self, TimeZone};
 use git2;
 use gtk::prelude::*;
 use gtk;
 
+#[derive(Debug)]
 pub struct CommitInfo {
+    pub id: git2::Oid,
     pub summary: String,
     pub short_id: String,
     pub author: String,
     pub commit_date: String
 }
 
+impl CommitInfo {
+    fn uncommitted_sentinel() -> CommitInfo {
+        CommitInfo {
+            id: git2::Oid::zero(),
+            summary: "Uncommitted changes".into(),
+            short_id: "*".into(),
+            author: "*".into(),
+            commit_date: "*".into()
+        }
+    }
+
+    fn is_sentinel(&self) -> bool {
+        self.id == git2::Oid::zero() && self.summary == "Uncommitted changes"
+    }
+}
+
 struct BranchPresenter<V> {
     view: RefCell<Weak<V>>,
     repo: Rc<git2::Repository>,
     branch: String
+}
+
+#[derive(Debug)]
+pub struct TreeItem {
+    id: git2::Oid,
+    path: String,
+    delta: git2::Delta
 }
 
 impl<V: BranchViewable> BranchPresenter<V> {
@@ -29,46 +55,85 @@ impl<V: BranchViewable> BranchPresenter<V> {
         }
     }
 
-    pub fn load_commit_history(&self) -> Vec<CommitInfo> {
-        let branch = &self.repo.find_branch(&self.branch, git2::BranchType::Local).expect("find branch");
-        let refr = branch.get().name().expect("find branch name as ref");
-        let mut revwalk = (&self.repo).revwalk().expect("get a revwalk");
-        revwalk.push_ref(refr).expect("push ref successfully");
+    fn on_uncommitted_changes_selected(&self) {
+        let repo_head_tree = self.repo.head().unwrap().peel_to_tree().unwrap();
+        let mut diff_opts = git2::DiffOptions::new();
+        diff_opts.include_untracked(true)
+            .recurse_untracked_dirs(true);
 
-        let infos: Vec<CommitInfo> = revwalk
-            .filter(|x| x.is_ok())
-            .map(|x| (&self.repo).find_commit(x.expect("item to unwrap")).expect("commit to be found"))
-            .map(|commit| {
-                let author = commit.author();
-                let subid = &format!("{}", commit.id())[0..7];
-                let full_summary = commit.summary().expect("valid summary");
-                let summary = &format!("{}", &full_summary)[0..min(80, full_summary.len())];
+        let mut workdir_diff = self.repo.diff_tree_to_workdir(Some(&repo_head_tree), Some(&mut diff_opts)).unwrap();
+        workdir_diff.find_similar(None).unwrap();
 
-                let naive_dt = chrono::Utc.timestamp(commit.time().seconds(), 0).naive_utc();
-                let offset = chrono::offset::FixedOffset::east(commit.time().offset_minutes() * 60);
-                let date: chrono::DateTime<chrono::FixedOffset> = chrono::DateTime::from_utc(naive_dt, offset);
+        let mut index_diff = self.repo.diff_tree_to_index(Some(&repo_head_tree), None, None).unwrap();
+        index_diff.find_similar(None).unwrap();
 
-                CommitInfo {
-                    summary: summary.to_string(),
-                    short_id: subid.to_string(),
-                    author: format!("{} <{}>", author.name().expect("valid author name"), author.email().expect("valid author email")),
-                    commit_date: date.to_string()
-                }
-            })
-            .collect();
+        let index_deltas: Vec<TreeItem> = index_diff.deltas().map(|d| {
+            TreeItem {
+                id: d.new_file().id(),
+                path: d.new_file().path().unwrap().to_string_lossy().to_string(),
+                delta: d.status()
+            }
+        }).collect();
 
-        infos
+        let workdir_deltas: Vec<TreeItem> = workdir_diff.deltas().map(|d| {
+            TreeItem {
+                id: d.new_file().id(),
+                path: d.new_file().path().unwrap().to_string_lossy().to_string(),
+                delta: d.status()
+            }
+        }).collect();
+
+        self.view().set_staged_statuses(&index_deltas);
+        self.view().set_unstaged_statuses(&workdir_deltas);
+    }
+
+    fn on_commit_selected<'a>(&self, info: &CommitInfo) {
+        let commit = self.repo.find_commit(info.id).expect("Commit to exist in repo");
+        let parent_commits: Vec<git2::Commit> = commit.parents().collect();
+
+        let maybe_parent = parent_commits.first().map(|x| x.tree().unwrap());
+        let parent = match maybe_parent {
+            Some(ref v) => Some(v),
+            None => None
+        };
+
+        let mut diff = self.repo.diff_tree_to_tree(
+            parent,
+            Some(&commit.tree().unwrap()),
+            None
+        ).expect("a diff");
+
+        diff.find_similar(None).unwrap();
+
+        let deltas: Vec<TreeItem> = diff.deltas().map(|d| {
+            TreeItem {
+                id: d.new_file().id(),
+                path: d.new_file().path().unwrap().to_string_lossy().to_string(),
+                delta: d.status()
+            }
+        }).collect();
+
+        self.view().set_staged_statuses(&deltas);
+        self.view().set_unstaged_statuses(&[]);
+    }
+
+    fn view(&self) -> Rc<V> {
+        self.view.borrow()
+            .upgrade()
+            .expect("BranchPresenter only running while view still exists")
     }
 }
 
 pub trait BranchViewable {
     fn new(repo: Rc<git2::Repository>, branch: String) -> Rc<Self>;
     fn widget(&self) -> &gtk::Paned;
+    fn set_staged_statuses(&self, statuses: &[TreeItem]);
+    fn set_unstaged_statuses(&self, statuses: &[TreeItem]);
 }
 
 pub struct BranchView {
-    presenter: BranchPresenter<BranchView>,
-    history_list_store: gtk::ListStore,
+    presenter: Rc<BranchPresenter<BranchView>>,
+    history_view: Rc<HistoryView>,
     file_status_view: Rc<FileStatusView>,
     unstaged_view: Rc<FileStatusView>,
     root: gtk::Paned
@@ -77,6 +142,7 @@ pub struct BranchView {
 trait FileStatusViewable {
     fn new() -> Rc<Self>;
     fn update_list(&self, statuses: &[&git2::StatusEntry], is_editable: bool);
+    fn update_list2(&self, statuses: &[TreeItem]);
 }
 
 struct FileStatusPresenter<V> {
@@ -98,6 +164,10 @@ impl<V: FileStatusViewable> FileStatusPresenter<V> {
 
     fn set_statuses(&self, statuses: &[&git2::StatusEntry]) {
         self.view().update_list(statuses, false);
+    }
+
+    fn set_history_statuses(&self, statuses: &[TreeItem]) {
+        self.view().update_list2(statuses);
     }
 }
 
@@ -129,6 +199,17 @@ impl FileStatusViewable for FileStatusView {
             self.status_list_store.insert_with_values(None, &[0, 1], &[
                 &format!("{:?}", entry.status()),
                 &entry.path().unwrap()
+            ]);
+        }
+    }
+
+    fn update_list2(&self, statuses: &[TreeItem]) {
+        self.status_list_store.clear();
+
+        for entry in statuses.iter() {
+            self.status_list_store.insert_with_values(None, &[0, 1], &[
+                &format!("{:?}", entry.delta),
+                &entry.path
             ]);
         }
     }
@@ -186,82 +267,124 @@ impl GitStatusExt for git2::Status {
     }
 }
 
-impl BranchViewable for BranchView {
-    fn new(repo: Rc<git2::Repository>, branch: String) -> Rc<BranchView> {
-        let list_store = gtk::ListStore::new(&[
-            String::static_type(),
-            String::static_type(),
-            String::static_type(),
-            String::static_type()
-        ]);
+trait HistoryViewable {
+    fn new(parent: Weak<BranchPresenter<BranchView>>) -> Rc<Self>;
+    fn set_history(&self, commits: &[CommitInfo]);
+}
 
-        let (file_status_view, unstaged_view, root) = BranchView::create(&list_store);
+struct HistoryPresenter<V> {
+    parent: Weak<BranchPresenter<BranchView>>,
+    view: RefCell<Weak<V>>,
+    commits: RefCell<Vec<CommitInfo>>
+}
 
-        let view = Rc::new(BranchView {
-            presenter: BranchPresenter::new(repo, branch),
-            history_list_store: list_store,
-            file_status_view: file_status_view,
-            unstaged_view: unstaged_view,
-            root: root
-        });
-
-        *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
-
-        // Init history
-        // view.presenter.load_status();
-        let commits = view.presenter.load_commit_history();
-        view.history_list_store.clear();
-
-        // Add setinel for uncommitted content
-        view.history_list_store.insert_with_values(None, &[0, 1, 2, 3], &[
-            &"Uncommitted changes",
-            &"*",
-            &"*",
-            &"*"
-        ]);
-
-        // Init file view
-        {
-            let statuses = view.presenter.repo.statuses(None).unwrap();
-            let entries: Vec<git2::StatusEntry> = statuses.iter().collect();
-
-            let mut unstaged = vec![];
-            let mut staged = vec![];
-
-            for entry in entries.iter() {
-                if entry.status().is_ignored() {
-                    continue
-                }
-
-                if !entry.status().is_in_index() {
-                    unstaged.push(entry);
-                } else {
-                    staged.push(entry);
-                }
-            }
-
-            view.unstaged_view.presenter.set_statuses(&unstaged);
-            view.file_status_view.presenter.set_statuses(&staged);
+impl<V: HistoryViewable> HistoryPresenter<V> {
+    fn new(parent: Weak<BranchPresenter<BranchView>>) -> HistoryPresenter<V> {
+        HistoryPresenter {
+            parent: parent,
+            view: RefCell::new(Weak::new()),
+            commits: RefCell::new(vec![])
         }
-
-        for commit in commits {
-            view.history_list_store.insert_with_values(None, &[0, 1, 2, 3], &[
-                &commit.summary,
-                &commit.short_id,
-                &commit.author,
-                &commit.commit_date
-            ]);
-        }
-
-        view
     }
 
-    fn widget(&self) -> &gtk::Paned {
-        &self.root
+    fn view(&self) -> Rc<V> {
+        self.view.borrow()
+            .upgrade()
+            .expect("Presenter only running while view still exists")
+    }
+
+    fn parent(&self) -> Rc<BranchPresenter<BranchView>> {
+        self.parent
+            .upgrade()
+            .expect("Presenter only running while parent still exists")
+    }
+
+    fn has_uncommitted_changes(&self) -> bool {
+        let parent = self.parent();
+        let statuses = parent.repo.statuses(None).unwrap();
+        statuses.iter().filter(|x| !x.status().is_ignored()).count() > 0
+    }
+
+    pub fn load_commit_history(&self) {
+        let parent = self.parent();
+        let branch = &parent.repo.find_branch(&self.parent().branch, git2::BranchType::Local).expect("find branch");
+        let refr = branch.get().name().expect("find branch name as ref");
+        let mut revwalk = (&parent.repo).revwalk().expect("get a revwalk");
+        revwalk.push_ref(refr).expect("push ref successfully");
+
+        let mut infos = vec![];
+
+        if self.has_uncommitted_changes() {
+            infos.push(CommitInfo::uncommitted_sentinel());
+        }
+
+        for rev in revwalk {
+            let rev = match rev {
+                Ok(v) => v,
+                Err(_) => continue
+            };
+
+            let commit = (&parent.repo).find_commit(rev).expect("commit to be found");
+
+            let author = commit.author();
+            let subid = &format!("{}", commit.id())[0..7];
+            let full_summary = commit.summary().expect("valid summary");
+            let summary = &format!("{}", &full_summary)[0..min(80, full_summary.len())];
+
+            let naive_dt = chrono::Utc.timestamp(commit.time().seconds(), 0).naive_utc();
+            let offset = chrono::offset::FixedOffset::east(commit.time().offset_minutes() * 60);
+            let date: chrono::DateTime<chrono::FixedOffset> = chrono::DateTime::from_utc(naive_dt, offset);
+
+            let author_name = author.name().expect("valid author name");
+            let author_email = author.email().expect("valid author email");
+
+            let info = CommitInfo {
+                id: commit.id(),
+                summary: summary.to_string(),
+                short_id: subid.to_string(),
+                author: format!("{} <{}>", &author_name, &author_email),
+                commit_date: date.to_string()
+            };
+
+            infos.push(info);
+        }
+
+        *self.commits.borrow_mut() = infos;
+
+        self.view().set_history(&self.commits.borrow());
+    }
+
+    fn on_item_selected(&self, index: i32) {
+        if index < 0 {
+            return;
+        }
+
+        let info = &self.commits.borrow()[index as usize];
+
+        if info.is_sentinel() {
+            self.parent().on_uncommitted_changes_selected();
+        } else {
+            self.parent().on_commit_selected(&info)
+        }
+    }
+
+    fn start(&self) {
+        self.load_commit_history();
     }
 }
 
-impl BranchView {
+struct HistoryView {
+    presenter: HistoryPresenter<HistoryView>,
+    list_store: gtk::ListStore,
+    tree: gtk::TreeView,
+    root: gtk::ScrolledWindow
+}
+
+impl HistoryView {
+    fn widget(&self) -> &gtk::ScrolledWindow {
+        &self.root
+    }
+
     fn create_tree(model: &gtk::ListStore) -> gtk::TreeView {
         fn append_column(tree: &gtk::TreeView, id: i32, title: &str) {
             let column = gtk::TreeViewColumn::new();
@@ -284,15 +407,96 @@ impl BranchView {
         treeview.set_model(model);
         treeview
     }
+}
 
-    fn create(model: &gtk::ListStore) -> (Rc<FileStatusView>, Rc<FileStatusView>, gtk::Paned) {
-        let treeview = BranchView::create_tree(model);
+impl HistoryViewable for HistoryView {
+    fn new(parent: Weak<BranchPresenter<BranchView>>) -> Rc<HistoryView> {
+        let list_store = gtk::ListStore::new(&[
+            String::static_type(),
+            String::static_type(),
+            String::static_type(),
+            String::static_type()
+        ]);
+
+        let treeview = HistoryView::create_tree(&list_store);
 
         // Make tree view scrollable
-        let commit_history = gtk::ScrolledWindow::new(None, None);
-        commit_history.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
-        commit_history.add(&treeview);
+        let root = gtk::ScrolledWindow::new(None, None);
+        root.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
+        root.add(&treeview);
 
+        let view = Rc::new(HistoryView {
+            presenter: HistoryPresenter::new(parent),
+            list_store: list_store,
+            tree: treeview,
+            root: root
+        });
+
+        *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
+
+        let cloned_view = Rc::clone(&view);
+        view.tree.connect_cursor_changed(move |this| {
+            if let Some(path) = this.get_cursor().0 {
+                if let Some(idx) = path.get_indices().first() {
+                    cloned_view.presenter.on_item_selected(*idx);
+                }
+            }
+        });
+
+        view.presenter.start();
+        
+        view
+    }
+
+    fn set_history(&self, commits: &[CommitInfo]) {
+        self.list_store.clear();
+
+        for commit in commits {
+            self.list_store.insert_with_values(None, &[0, 1, 2, 3], &[
+                &commit.summary,
+                &commit.short_id,
+                &commit.author,
+                &commit.commit_date
+            ]);
+        }
+    }
+}
+
+impl BranchViewable for BranchView {
+    fn set_staged_statuses(&self, statuses: &[TreeItem]) {
+        self.file_status_view.presenter.set_history_statuses(statuses);
+    }
+    
+    fn set_unstaged_statuses(&self, statuses: &[TreeItem]) {
+        self.unstaged_view.presenter.set_history_statuses(statuses);
+    }
+
+    fn new(repo: Rc<git2::Repository>, branch: String) -> Rc<BranchView> {
+        let presenter = Rc::new(BranchPresenter::new(repo, branch));
+
+        let (history_view, file_status_view, unstaged_view, root) = BranchView::create(Rc::downgrade(&presenter));
+
+        let view = Rc::new(BranchView {
+            presenter: Rc::clone(&presenter),
+            history_view: history_view,
+            file_status_view: file_status_view,
+            unstaged_view: unstaged_view,
+            root: root
+        });
+
+        *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
+
+        view
+    }
+
+    fn widget(&self) -> &gtk::Paned {
+        &self.root
+    }
+}
+
+impl BranchView {
+    fn create(parent: Weak<BranchPresenter<BranchView>>) -> (Rc<HistoryView>, Rc<FileStatusView>, Rc<FileStatusView>, gtk::Paned) {
+        let commit_history = HistoryView::new(parent);
         let selected_files = FileStatusView::new();
         let unstaged_files = FileStatusView::new();
         let diff_view = gtk::Label::new("Diff view TODO");
@@ -308,9 +512,9 @@ impl BranchView {
         bottom_pane.pack1(&file_pane, true, true);
         bottom_pane.pack2(&diff_view, true, true);
 
-        main_pane.pack1(&commit_history, true, true);
+        main_pane.pack1(commit_history.widget(), true, true);
         main_pane.pack2(&bottom_pane, true, true);
 
-        (selected_files, unstaged_files, main_pane)
+        (commit_history, selected_files, unstaged_files, main_pane)
     }
 }
