@@ -9,6 +9,7 @@ use chrono::{self, TimeZone};
 use git2;
 use gtk::prelude::*;
 use gtk;
+use gdk;
 
 #[derive(Debug)]
 pub struct CommitInfo {
@@ -228,6 +229,20 @@ impl FileStatusView {
 
         let treeview = gtk::TreeView::new();
         treeview.set_headers_visible(false);
+
+        treeview.connect_button_press_event(|_, event| {
+            use std::ops::Deref;
+
+            if event.get_button() == 3 { // Right click
+                let menu = gtk::Menu::new();
+                menu.append(&gtk::MenuItem::new_with_label("Test 1"));
+                menu.append(&gtk::MenuItem::new_with_label("Test 2"));
+                menu.append(&gtk::MenuItem::new_with_label("Test 3"));
+                menu.popup_at_pointer(Some(event.deref()));
+            }
+
+            gtk::Inhibit(false)
+        });
 
         append_column(&treeview, 0, "Status");
         append_column(&treeview, 1, "Path");
@@ -484,7 +499,6 @@ impl HistoryViewable for HistoryView {
 
         *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
 
-        // TODO: this should be weak
         let weak_view = Rc::downgrade(&view);
         view.tree.connect_cursor_changed(move |_| {
             if let Some(view) = weak_view.upgrade() {
