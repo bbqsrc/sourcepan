@@ -485,10 +485,12 @@ impl HistoryViewable for HistoryView {
         *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
 
         // TODO: this should be weak
-        let cloned_view = Rc::clone(&view);
+        let weak_view = Rc::downgrade(&view);
         view.tree.connect_cursor_changed(move |_| {
-            if let Some(idx) = cloned_view.selected_row() {
-                cloned_view.presenter.on_item_selected(idx);
+            if let Some(view) = weak_view.upgrade() {
+                if let Some(idx) = view.selected_row() {
+                    view.presenter.on_item_selected(idx);
+                }
             }
         });
 
