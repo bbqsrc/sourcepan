@@ -1,4 +1,5 @@
 mod branch;
+mod history;
 
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
@@ -11,6 +12,31 @@ use gtk;
 
 use ui::Window;
 use ui::main::branch::{BranchViewable, BranchView};
+
+#[derive(Debug)]
+pub struct CommitInfo {
+    pub id: git2::Oid,
+    pub summary: String,
+    pub short_id: String,
+    pub author: String,
+    pub commit_date: String
+}
+
+impl CommitInfo {
+    pub fn uncommitted_sentinel() -> CommitInfo {
+        CommitInfo {
+            id: git2::Oid::zero(),
+            summary: "Uncommitted changes".into(),
+            short_id: "*".into(),
+            author: "*".into(),
+            commit_date: "*".into()
+        }
+    }
+
+    pub fn is_sentinel(&self) -> bool {
+        self.id == git2::Oid::zero() && self.summary == "Uncommitted changes"
+    }
+}
 
 struct MainPresenter<V> {
     view: RefCell<Weak<V>>,
