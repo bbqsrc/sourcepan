@@ -181,15 +181,11 @@ impl FileStatusViewable for FileStatusView {
     fn new() -> Rc<FileStatusView> {
         let (list_store, root) = FileStatusView::create();
 
-        let view = Rc::new(FileStatusView {
+        view!(FileStatusView {
             presenter: FileStatusPresenter::new(),
             status_list_store: list_store,
             root: root
-        });
-
-        *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
-
-        view
+        })
     }
 
     fn update_list(&self, statuses: &[TreeItem]) {
@@ -280,9 +276,7 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
             watcher: RefCell::new(Watcher::new(tx, Duration::from_secs(2)).unwrap())
         });
 
-        let weak_presenter = Rc::downgrade(&presenter);
-
-        gtk::idle_add(move || {
+        gtk::idle_add(weak!(presenter => move || {
             match rx.try_recv() {
                 Err(err) => {
                     match err {
@@ -293,7 +287,7 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
                     }
                 },
                 Ok(v) => {
-                    match weak_presenter.upgrade() {
+                    match presenter.upgrade() {
                         Some(p) => {
                             p.on_path_change_event(v);
                             gtk::Continue(true)
@@ -304,7 +298,7 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
                     }
                 }
             }
-        });
+        }));
 
         presenter
     }
@@ -475,24 +469,22 @@ impl HistoryViewable for HistoryView {
         root.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
         root.add(&treeview);
 
-        let view = Rc::new(HistoryView {
+        let view = view!(HistoryView {
             presenter: HistoryPresenter::new(parent),
             list_store: list_store,
             tree: treeview,
             root: root
         });
 
-        *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
-
-        // TODO: this should be weak
-        let weak_view = Rc::downgrade(&view);
-        view.tree.connect_cursor_changed(move |_| {
-            if let Some(view) = weak_view.upgrade() {
+        view.tree.connect_cursor_changed(weak!(view => move |_| {
+            if let Some(view) = view.upgrade() {
                 if let Some(idx) = view.selected_row() {
                     view.presenter.on_item_selected(idx);
                 }
+            } else {
+                panic!("HistoryView not found in weak reference counter for tree selection");
             }
-        });
+        }));
 
         view.presenter.start();
         
@@ -548,15 +540,13 @@ impl BranchViewable for BranchView {
 
         let (history_view, file_status_view, unstaged_view, root) = BranchView::create(Rc::downgrade(&presenter));
 
-        let view = Rc::new(BranchView {
+        let view = view!(BranchView {
             presenter: Rc::clone(&presenter),
             history_view: history_view,
             file_status_view: file_status_view,
             unstaged_view: unstaged_view,
             root: root
         });
-
-        *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
 
         view
     }

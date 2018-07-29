@@ -1,11 +1,13 @@
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::path::Path;
+use std::error;
 
 use git2;
 use gtk::prelude::*;
 use gtk;
 
+use ui::Window;
 use ui::main::{MainViewable, MainWindow};
 
 struct InitPresenter<V: InitViewable> {
@@ -30,7 +32,14 @@ impl<V: InitViewable> InitPresenter<V> {
     fn select_repo(&self, repo_dir: &Path) {
         use Config;
 
-        let repo = git2::Repository::open(&repo_dir).unwrap();
+        let repo = match git2::Repository::open(&repo_dir) {
+            Ok(repo) => repo,
+            Err(err) => {
+                self.view().handle_error(err);
+                return;
+            }
+        };
+
         self.view().open_main_window_with(repo);
 
         Config::set_repo_dir(&repo_dir.to_string_lossy());
@@ -43,6 +52,7 @@ pub trait InitViewable {
     fn hide(&self);
     fn open_repo_selector(&self);
     fn open_main_window_with(&self, repo: git2::Repository);
+    fn handle_error<E: error::Error>(&self, error: E);
 }
 
 pub struct InitWindow {
@@ -68,25 +78,43 @@ impl InitWindow {
     }
 }
 
+impl Window for InitWindow {}
+
 impl InitViewable for InitWindow {
     fn new() -> Rc<InitWindow> {
         let (window, open_button) = InitWindow::create();
 
-        let view = Rc::new(InitWindow {
+        let view = view!(InitWindow {
             presenter: InitPresenter::new(),
             window: window
         });
 
-        *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
-
-        let weak_view = Rc::clone(&view); //Rc::downgrade(&view);
-        open_button.connect_clicked(move |_| {
-            // if let Some(v) = weak_view.upgrade() {
-                weak_view.presenter.click_open();
-            // }
-        });
+        open_button.connect_clicked(weak!(view => move |_| {
+            if let Some(v) = view.upgrade() {
+                v.presenter.click_open();
+            } else {
+                panic!("Open button on InitWindow failed to resolve weak reference");
+            }
+        }));
 
         view
+    }
+
+
+    fn handle_error<E: error::Error>(&self, error: E) {
+        let dialog = gtk::MessageDialog::new(
+            Some(&self.window),
+            gtk::DialogFlags::MODAL,
+            gtk::MessageType::Error,
+            gtk::ButtonsType::Close,
+            &format!("{}", error)
+        );
+
+        dialog.set_title("Error");
+        dialog.run();
+
+        // Once you press close, main loop returns control and closes the window.
+        dialog.destroy();
     }
 
     fn show(&self) {
@@ -107,7 +135,7 @@ impl InitViewable for InitWindow {
         
         let result = dialog.run();
 
-        if result == -3 { // gtk::ResponseType::Accept.into() {
+        if result == -3 {
             if let Some(filename) = dialog.get_filename() {
                 self.presenter.select_repo(&filename);
             }

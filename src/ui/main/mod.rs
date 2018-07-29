@@ -3,11 +3,13 @@ mod branch;
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::path::Path;
+use std::error;
 
 use git2;
 use gtk::prelude::*;
 use gtk;
 
+use ui::Window;
 use ui::main::branch::{BranchViewable, BranchView};
 
 struct MainPresenter<V> {
@@ -21,6 +23,7 @@ pub trait MainViewable {
     fn show(&self);
     fn set_title(&self, path: &str);
     fn open_repo_selector(&self);
+    fn handle_error<T: error::Error>(&self, error: T);
 }
 
 impl<V: MainViewable> MainPresenter<V> {
@@ -44,7 +47,14 @@ impl<V: MainViewable> MainPresenter<V> {
     fn select_repo(&self, repo_dir: &Path) {
         use Config;
 
-        let repo = git2::Repository::open(&repo_dir).unwrap();
+        let repo = match git2::Repository::open(&repo_dir) {
+            Ok(repo) => repo,
+            Err(err) => {
+                self.view().handle_error(err);
+                return;
+            }
+        };
+
         *self.repo.borrow_mut() = Rc::new(repo);
 
         Config::set_repo_dir(&repo_dir.to_string_lossy());
@@ -69,31 +79,58 @@ impl<V: MainViewable> MainPresenter<V> {
         let path = repo.path().parent().unwrap().to_string_lossy();
         self.view().set_title(&path);
 
+        // TODO: add directory watcher for new branches
         self.update_branches();
     }
 }
+
+pub struct MainWindow {
+    presenter: MainPresenter<MainWindow>,
+    header: MainWindowHeader,
+    window: gtk::Window,
+    branch_views: RefCell<Vec<Rc<BranchView>>>
+}
+
+impl Window for MainWindow {}
 
 impl MainViewable for MainWindow {
     fn with_repo(repo: git2::Repository) -> Rc<Self> {
         let (window, header) = MainWindow::create();
 
-        let view = Rc::new(MainWindow {
+        let view = view!(MainWindow {
             presenter: MainPresenter::new(repo),
             header: header,
             window: window,
             branch_views: RefCell::new(vec![])
         });
-
-        *view.presenter.view.borrow_mut() = Rc::downgrade(&view);
-
-        let cloned_view = Rc::clone(&view);
-        view.header.open_button.connect_clicked(move |_| {
-            cloned_view.presenter.open_clicked();
-        });
+        
+        view.header.open_button.connect_clicked(weak!(view => move |_| {
+            if let Some(view) = view.upgrade() {
+                view.presenter.open_clicked();
+            } else {
+                panic!("MainWindow open_button failed to resolve weak parent view");
+            }
+        }));
 
         view.presenter.start();
 
         view
+    }
+
+    fn handle_error<T: error::Error>(&self, error: T) {
+        let dialog = gtk::MessageDialog::new(
+            Some(&self.window),
+            gtk::DialogFlags::MODAL,
+            gtk::MessageType::Error,
+            gtk::ButtonsType::Close,
+            &format!("{}", error)
+        );
+
+        dialog.set_title("Error");
+        dialog.run();
+
+        // Once you press close, main loop returns control and closes the window.
+        dialog.destroy();
     }
     
     fn set_branches(&self, repo: Rc<git2::Repository>, branches: Vec<String>) {
@@ -136,13 +173,6 @@ impl MainViewable for MainWindow {
         self.window.set_title(path);
         self.header.widget().set_title(path);
     }
-}
-
-pub struct MainWindow {
-    presenter: MainPresenter<MainWindow>,
-    header: MainWindowHeader,
-    window: gtk::Window,
-    branch_views: RefCell<Vec<Rc<BranchView>>>
 }
 
 struct MainWindowHeader {

@@ -5,6 +5,8 @@ extern crate preferences;
 extern crate notify;
 extern crate glib;
 
+use std::rc::Rc;
+
 use preferences::{AppInfo, Preferences, PreferencesMap};
 
 mod ui;
@@ -33,20 +35,33 @@ impl Config {
     }
 }
 
+fn create_main_window(repo: git2::Repository) -> Rc<ui::main::MainWindow> {
+    let main_window = ui::main::MainWindow::with_repo(repo);
+    main_window.show();
+    main_window
+}
+
+fn create_init_window() -> Rc<ui::init::InitWindow> {
+    let init_window = ui::init::InitWindow::new();
+    init_window.show();
+    init_window
+}
+
 fn main() {
     if gtk::init().is_err() {
         println!("Failed to initialize GTK.");
         return;
     }
 
-    if let Some(repo_dir) = Config::repo_dir() {
-        let repo = git2::Repository::open(&repo_dir).unwrap();
-        let main_window = ui::main::MainWindow::with_repo(repo);
-        main_window.show();
+    // Holds a strong reference to the primary window to stop some *fun* UB
+    let _window: Rc<ui::Window> = if let Some(repo_dir) = Config::repo_dir() {
+        match git2::Repository::open(&repo_dir) {
+            Ok(repo) => create_main_window(repo),
+            Err(_) => create_init_window()
+        }
     } else {
-        let init_window = ui::init::InitWindow::new();
-        init_window.show();
-    }
+        create_init_window()
+    };
 
     gtk::main();
 }
