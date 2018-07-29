@@ -1,10 +1,11 @@
 mod branch;
 mod history;
+mod filestatus;
 
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::path::Path;
-use std::error;
+use std::fmt;
 
 use git2;
 use gtk::prelude::*;
@@ -12,6 +13,7 @@ use gtk;
 
 use ui::Window;
 use ui::main::branch::{BranchViewable, BranchView};
+use ui::AsMessageDialog;
 
 #[derive(Debug)]
 pub struct CommitInfo {
@@ -49,7 +51,7 @@ pub trait MainViewable {
     fn show(&self);
     fn set_title(&self, path: &str);
     fn open_repo_selector(&self);
-    fn handle_error<T: error::Error>(&self, error: T);
+    fn handle_error(&self, error: impl fmt::Display);
 }
 
 impl<V: MainViewable> MainPresenter<V> {
@@ -143,19 +145,9 @@ impl MainViewable for MainWindow {
         view
     }
 
-    fn handle_error<T: error::Error>(&self, error: T) {
-        let dialog = gtk::MessageDialog::new(
-            Some(&self.window),
-            gtk::DialogFlags::MODAL,
-            gtk::MessageType::Error,
-            gtk::ButtonsType::Close,
-            &format!("{}", error)
-        );
-
-        dialog.set_title("Error");
+    fn handle_error(&self, error: impl fmt::Display) {
+        let dialog = error.as_message_dialog(Some(&self.window));
         dialog.run();
-
-        // Once you press close, main loop returns control and closes the window.
         dialog.destroy();
     }
     
@@ -164,7 +156,7 @@ impl MainViewable for MainWindow {
         let mut branch_views = vec![];
 
         for name in branches.into_iter() {
-            let branch_view = BranchView::new(Rc::clone(&repo), name.to_string());
+            let branch_view = BranchView::new(&self.window, Rc::clone(&repo), name.to_string());
             &stack.add_titled(branch_view.widget(), &format!("branch-{}", name), &name);
             branch_views.push(branch_view);
         }
@@ -302,4 +294,11 @@ impl MainWindow {
 
         (window, header)
     }
+}
+
+#[derive(Debug)]
+pub struct TreeItem {
+    id: git2::Oid,
+    path: String,
+    delta: git2::Delta
 }

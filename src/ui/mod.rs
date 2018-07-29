@@ -1,5 +1,7 @@
 #![macro_use]
 
+use gtk;
+
 macro_rules! view {
     ($view:expr) => {
         {
@@ -42,6 +44,28 @@ macro_rules! weak {
             move |$(weak!(@param $p),)+| $body
         }
     );
+}
+
+use std::fmt;
+use gtk::prelude::*;
+
+pub trait AsMessageDialog : fmt::Display {
+    fn as_message_dialog<W: IsA<gtk::Window>>(&self, parent: Option<&W>) -> gtk::MessageDialog;
+}
+
+impl<T: fmt::Display> AsMessageDialog for T {
+    fn as_message_dialog<W: IsA<gtk::Window>>(&self, parent: Option<&W>) -> gtk::MessageDialog {
+        let dialog = gtk::MessageDialog::new(
+            parent,
+            gtk::DialogFlags::MODAL,
+            gtk::MessageType::Error,
+            gtk::ButtonsType::Close,
+            &format!("{}", self)
+        );
+
+        dialog.set_title("Error");
+        dialog
+    }
 }
 
 pub trait Window {}

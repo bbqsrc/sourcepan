@@ -1,24 +1,22 @@
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
+use std::fmt;
 
 use git2;
 use gtk::prelude::*;
 use gtk;
 
+use super::filestatus::{FileStatusView, FileStatusViewable};
 use super::history::{HistoryView, HistoryViewable};
 use super::CommitInfo;
+
+use ui::main::TreeItem;
+use ui::AsMessageDialog;
 
 pub struct BranchPresenter<V> {
     view: RefCell<Weak<V>>,
     repo: Rc<git2::Repository>,
     branch: String
-}
-
-#[derive(Debug)]
-pub struct TreeItem {
-    id: git2::Oid,
-    path: String,
-    delta: git2::Delta
 }
 
 impl<V: BranchViewable> BranchPresenter<V> {
@@ -103,7 +101,7 @@ impl<V: BranchViewable> BranchPresenter<V> {
         self.view().set_unstaged_statuses(&[]);
     }
 
-    fn view(&self) -> Rc<V> {
+    pub fn view(&self) -> Rc<V> {
         self.view.borrow()
             .upgrade()
             .expect("BranchPresenter only running while view still exists")
@@ -111,8 +109,8 @@ impl<V: BranchViewable> BranchPresenter<V> {
 }
 
 pub trait BranchViewable {
-    fn new(repo: Rc<git2::Repository>, branch: String) -> Rc<Self>;
-    fn widget(&self) -> &gtk::Paned;
+    fn new(window: &gtk::Window, repo: Rc<git2::Repository>, branch: String) -> Rc<Self>;
+    fn handle_error(&self, error: impl fmt::Display);
     fn set_staged_statuses(&self, statuses: &[TreeItem]);
     fn set_unstaged_statuses(&self, statuses: &[TreeItem]);
 }
@@ -123,127 +121,12 @@ pub struct BranchView {
     history_view: Rc<HistoryView>,
     file_status_view: Rc<FileStatusView>,
     unstaged_view: Rc<FileStatusView>,
-    root: gtk::Paned
-}
-
-trait FileStatusViewable {
-    fn new() -> Rc<Self>;
-    fn update_list(&self, statuses: &[TreeItem]);
-}
-
-struct FileStatusPresenter<V> {
-    view: RefCell<Weak<V>>
-}
-
-impl<V: FileStatusViewable> FileStatusPresenter<V> {
-    fn new() -> FileStatusPresenter<V> {
-        FileStatusPresenter {
-            view: RefCell::new(Weak::new())
-        }
-    }
-
-    fn view(&self) -> Rc<V> {
-        self.view.borrow()
-            .upgrade()
-            .expect("Presenter only running while view still exists")
-    }
-
-    fn set_history_statuses(&self, statuses: &[TreeItem]) {
-        self.view().update_list(statuses);
-    }
-}
-
-struct FileStatusView {
-    presenter: FileStatusPresenter<FileStatusView>,
-    status_list_store: gtk::ListStore,
-    root: gtk::ScrolledWindow
-}
-
-impl FileStatusViewable for FileStatusView {
-    fn new() -> Rc<FileStatusView> {
-        let (list_store, root) = FileStatusView::create();
-
-        view!(FileStatusView {
-            presenter: FileStatusPresenter::new(),
-            status_list_store: list_store,
-            root: root
-        })
-    }
-
-    fn update_list(&self, statuses: &[TreeItem]) {
-        self.status_list_store.clear();
-
-        for entry in statuses.iter() {
-            self.status_list_store.insert_with_values(None, &[0, 1], &[
-                &format!("{:?}", entry.delta),
-                &entry.path
-            ]);
-        }
-    }
-}
-
-impl FileStatusView {
-    fn widget(&self) -> &gtk::ScrolledWindow {
-        &self.root
-    }
-
-    fn create() -> (gtk::ListStore, gtk::ScrolledWindow) {
-        let list_store = gtk::ListStore::new(&[
-            String::static_type(),
-            String::static_type()
-        ]);
-
-        fn append_column(tree: &gtk::TreeView, id: i32, title: &str) {
-            let column = gtk::TreeViewColumn::new();
-            let cell = gtk::CellRendererText::new();
-
-            column.pack_start(&cell, true);
-            column.set_resizable(true);
-            column.set_title(title);
-            column.add_attribute(&cell, "text", id);
-            tree.append_column(&column);
-        }
-
-        let treeview = gtk::TreeView::new();
-        treeview.set_headers_visible(false);
-
-        append_column(&treeview, 0, "Status");
-        append_column(&treeview, 1, "Path");
-
-        treeview.set_model(&list_store);
-
-        let scroller = gtk::ScrolledWindow::new(None, None);
-        scroller.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
-        scroller.add(&treeview);
-
-        (list_store, scroller)
-    }
-}
-
-trait GitStatusExt {
-    fn is_in_index(&self) -> bool;
-}
-
-impl GitStatusExt for git2::Status {
-    fn is_in_index(&self) -> bool {
-        self.is_index_new() ||
-            self.is_index_modified() ||
-            self.is_index_deleted() ||
-            self.is_index_renamed() ||
-            self.is_index_typechange()
-    }
+    root: gtk::Paned,
+    window: gtk::Window
 }
 
 impl BranchViewable for BranchView {
-    fn set_staged_statuses(&self, statuses: &[TreeItem]) {
-        self.file_status_view.presenter.set_history_statuses(statuses);
-    }
-    
-    fn set_unstaged_statuses(&self, statuses: &[TreeItem]) {
-        self.unstaged_view.presenter.set_history_statuses(statuses);
-    }
-
-    fn new(repo: Rc<git2::Repository>, branch: String) -> Rc<BranchView> {
+    fn new(window: &gtk::Window, repo: Rc<git2::Repository>, branch: String) -> Rc<BranchView> {
         let presenter = Rc::new(BranchPresenter::new(repo, branch));
 
         let (history_view, file_status_view, unstaged_view, root) = BranchView::create(Rc::downgrade(&presenter));
@@ -253,14 +136,25 @@ impl BranchViewable for BranchView {
             history_view: history_view,
             file_status_view: file_status_view,
             unstaged_view: unstaged_view,
-            root: root
+            root: root,
+            window: window.clone()
         });
 
         view
     }
-
-    fn widget(&self) -> &gtk::Paned {
-        &self.root
+    
+    fn handle_error(&self, error: impl fmt::Display) {
+        let dialog = error.as_message_dialog(Some(&self.window));
+        dialog.run();
+        dialog.destroy();
+    }
+    
+    fn set_staged_statuses(&self, statuses: &[TreeItem]) {
+        self.file_status_view.presenter.set_history_statuses(statuses);
+    }
+    
+    fn set_unstaged_statuses(&self, statuses: &[TreeItem]) {
+        self.unstaged_view.presenter.set_history_statuses(statuses);
     }
 }
 
@@ -286,5 +180,9 @@ impl BranchView {
         main_pane.pack2(&bottom_pane, true, true);
 
         (commit_history, selected_files, unstaged_files, main_pane)
+    }
+
+    pub fn widget(&self) -> &gtk::Paned {
+        &self.root
     }
 }

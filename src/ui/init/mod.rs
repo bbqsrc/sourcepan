@@ -1,7 +1,7 @@
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::path::Path;
-use std::error;
+use std::fmt;
 
 use git2;
 use gtk::prelude::*;
@@ -9,6 +9,7 @@ use gtk;
 
 use ui::Window;
 use ui::main::{MainViewable, MainWindow};
+use ui::AsMessageDialog;
 
 struct InitPresenter<V: InitViewable> {
     view: RefCell<Weak<V>>
@@ -52,7 +53,7 @@ pub trait InitViewable {
     fn hide(&self);
     fn open_repo_selector(&self);
     fn open_main_window_with(&self, repo: git2::Repository);
-    fn handle_error<E: error::Error>(&self, error: E);
+    fn handle_error(&self, error: impl fmt::Display);
 }
 
 pub struct InitWindow {
@@ -100,20 +101,9 @@ impl InitViewable for InitWindow {
         view
     }
 
-
-    fn handle_error<E: error::Error>(&self, error: E) {
-        let dialog = gtk::MessageDialog::new(
-            Some(&self.window),
-            gtk::DialogFlags::MODAL,
-            gtk::MessageType::Error,
-            gtk::ButtonsType::Close,
-            &format!("{}", error)
-        );
-
-        dialog.set_title("Error");
+    fn handle_error(&self, error: impl fmt::Display) {
+        let dialog = error.as_message_dialog(Some(&self.window));
         dialog.run();
-
-        // Once you press close, main loop returns control and closes the window.
         dialog.destroy();
     }
 

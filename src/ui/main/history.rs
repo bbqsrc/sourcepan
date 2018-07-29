@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use std::cmp::min;
 use std::sync::mpsc::{channel, TryRecvError};
 use std::time::Duration;
+use std::fmt;
 
 use notify::{DebouncedEvent, RecommendedWatcher, Watcher, RecursiveMode};
 use chrono::{self, TimeZone};
@@ -10,13 +11,14 @@ use git2;
 use gtk::prelude::*;
 use gtk;
 
-use super::branch::{BranchPresenter, BranchView};
+use super::branch::{BranchPresenter, BranchView, BranchViewable};
 use super::CommitInfo;
 
 pub trait HistoryViewable {
     fn new(parent: Weak<BranchPresenter<BranchView>>) -> Rc<Self>;
     fn set_history(&self, commits: &[CommitInfo]);
     fn selected_row(&self) -> Option<usize>;
+    fn handle_error(&self, error: impl fmt::Display);
 }
 
 struct HistoryPresenter<V> {
@@ -172,9 +174,13 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
         self.load_commit_history();
         let parent = self.parent();
 
-        self.watcher.borrow_mut()
-            .watch(parent.repo().path().parent().unwrap(), RecursiveMode::Recursive)
-            .unwrap();
+        let result = self.watcher.borrow_mut()
+            .watch(parent.repo().path().parent().unwrap(), RecursiveMode::Recursive);
+
+        match result {
+            Ok(_) => {},
+            Err(err) => self.view().handle_error(err)
+        }
     }
 }
 
@@ -250,6 +256,10 @@ impl HistoryViewable for HistoryView {
         view.presenter.start();
         
         view
+    }
+
+    fn handle_error(&self, error: impl fmt::Display) {
+        self.presenter.parent().view().handle_error(error);
     }
 
     fn selected_row(&self) -> Option<usize> {
