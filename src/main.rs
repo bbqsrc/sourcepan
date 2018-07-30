@@ -56,7 +56,10 @@ fn main() {
     }
 
     let css_provider = gtk::CssProvider::new();
-    css_provider.load_from_data(include_str!("ui/app.css").as_bytes()).unwrap();
+    match css_provider.load_from_data(include_str!("ui/app.css").as_bytes()) {
+        Ok(_) => {},
+        Err(e) => panic!(e)
+    };
     gtk::StyleContext::add_provider_for_screen(
         &gdk::Screen::get_default().unwrap(),
         &css_provider,

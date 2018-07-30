@@ -1,6 +1,7 @@
 mod branch;
 mod history;
 mod filestatus;
+mod diff;
 
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;

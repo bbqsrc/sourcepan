@@ -2,3 +2,13 @@
     background-image: none;
     background-color: white;
 }
+
+.monospace {
+    font-family: "Menlo", "Monaco", "Lucida Console", "Consolas", "Source Code Pro", "Hasklig", "DejaVu Sans Mono", monospace;
+    font-size: 10pt;
+    padding: 0;
+}
+
+.diff-label {
+    padding: 8px;
+}
