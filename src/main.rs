@@ -9,6 +9,7 @@ extern crate gdk;
 use std::rc::Rc;
 
 use preferences::{AppInfo, Preferences, PreferencesMap};
+use gtk::prelude::*;
 
 mod ui;
 
@@ -53,6 +54,13 @@ fn main() {
         println!("Failed to initialize GTK.");
         return;
     }
+
+    let css_provider = gtk::CssProvider::new();
+    css_provider.load_from_data(include_str!("ui/app.css").as_bytes()).unwrap();
+    gtk::StyleContext::add_provider_for_screen(
+        &gdk::Screen::get_default().unwrap(),
+        &css_provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
     // Holds a strong reference to the primary window to stop some *fun* UB
     let _window: Rc<ui::Window> = if let Some(repo_dir) = Config::repo_dir() {

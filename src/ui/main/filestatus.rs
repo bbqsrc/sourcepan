@@ -5,10 +5,9 @@ use std::path::Path;
 use git2;
 use gtk::prelude::*;
 use gtk;
-use gdk;
 
 use ui::main::TreeItem;
-use super::branch::{BranchPresenter, BranchView, BranchViewable};
+use super::branch::{BranchPresenter, BranchView};
 
 pub trait FileStatusViewable {
     fn new(parent: Weak<BranchPresenter<BranchView>>) -> Rc<Self>;
@@ -90,7 +89,7 @@ impl OverviewView {
         label.set_selectable(true);
 
         let root = gtk::ScrolledWindow::new(None, None);
-        root.override_background_color(gtk::StateFlags::NORMAL, Some(&gdk::RGBA::white()));
+        root.get_style_context().unwrap().add_class("white-background");
         
         root.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
         root.add(&label);
@@ -137,8 +136,6 @@ pub struct FileStatusView {
 
 impl FileStatusViewable for FileStatusView {
     fn new(parent: Weak<BranchPresenter<BranchView>>) -> Rc<FileStatusView> {
-        // let (root, staged_view, unstaged_view, overview_view) = FileStatusView::create_staging();
-
         let root = gtk::Paned::new(gtk::Orientation::Vertical);
 
         let staged_view = FileListView::new();
@@ -232,12 +229,6 @@ pub struct FileListView {
 }
 
 impl FileListView {
-    fn new_readonly() -> FileListView {
-        let view = FileListView::new();
-        view.columns[0].set_visible(false);
-        view
-    }
-
     fn new() -> FileListView {
         let list_store = gtk::ListStore::new(&[
             bool::static_type(),
@@ -305,35 +296,7 @@ impl FileListView {
 }
 
 impl FileStatusView {
-    fn create() -> (gtk::Paned, FileListView, FileListView, OverviewView) {
-        let file_pane = gtk::Paned::new(gtk::Orientation::Vertical);
-
-        let staged_view = FileListView::new();
-        let unstaged_view = FileListView::new();
-        let overview_view = OverviewView::new();
-
-        // Add everything to the panes
-        file_pane.pack1(staged_view.widget(), true, true);
-        file_pane.pack2(unstaged_view.widget(), true, true);
-
-        (file_pane, staged_view, unstaged_view, overview_view)
-    }
-
     pub fn widget(&self) -> &gtk::Paned {
         &self.root
-    }
-}
-
-trait GitStatusExt {
-    fn is_in_index(&self) -> bool;
-}
-
-impl GitStatusExt for git2::Status {
-    fn is_in_index(&self) -> bool {
-        self.is_index_new() ||
-            self.is_index_modified() ||
-            self.is_index_deleted() ||
-            self.is_index_renamed() ||
-            self.is_index_typechange()
     }
 }
