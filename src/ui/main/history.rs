@@ -10,6 +10,7 @@ use chrono::{self, TimeZone};
 use git2;
 use gtk::prelude::*;
 use gtk;
+use glib::markup_escape_text;
 
 use super::branch::{BranchPresenter, BranchView, BranchViewable};
 use super::CommitInfo;
@@ -129,7 +130,7 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
 
         let parent = self.parent();
         if path.ends_with("index") || path.ends_with(&parent.branch()) || !path.components().any(|x| x.as_os_str() == ".git") {
-            self.load_commit_history();
+            self.update_commit_history();
             if let Some(idx) = self.view().selected_row() {
                 self.on_item_selected(idx);
             }
@@ -154,7 +155,7 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
         statuses.iter().filter(|x| !x.status().is_ignored()).count() > 0
     }
 
-    pub fn load_commit_history(&self) {
+    pub fn update_commit_history(&self) {
         let parent = self.parent();
         let branch = &parent.repo().find_branch(&self.parent().branch(), git2::BranchType::Local).expect("find branch");
         let refr = branch.get().name().expect("find branch name as ref");
@@ -202,7 +203,7 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
     }
 
     fn start(&self) {
-        self.load_commit_history();
+        self.update_commit_history();
         let parent = self.parent();
 
         let result = self.watcher.borrow_mut()
@@ -231,7 +232,7 @@ impl HistoryView {
             column.pack_start(&cell, true);
             column.set_resizable(true);
             column.set_title(title);
-            column.add_attribute(&cell, "text", id);
+            column.add_attribute(&cell, "markup", id);
             tree.append_column(&column);
         }
 
@@ -248,6 +249,24 @@ impl HistoryView {
 
     pub fn widget(&self) -> &gtk::ScrolledWindow {
         &self.root
+    }
+
+    fn add_to_tree_escaped(&self, commit: &CommitInfo) {
+        self.list_store.insert_with_values(None, &[0, 1, 2, 3], &[
+            &markup_escape_text(&commit.summary),
+            &markup_escape_text(&commit.short_id),
+            &markup_escape_text(&commit.author),
+            &markup_escape_text(&commit.commit_date)
+        ]);
+    }
+
+    fn add_to_tree(&self, commit: &CommitInfo) {
+        self.list_store.insert_with_values(None, &[0, 1, 2, 3], &[
+            &commit.summary,
+            &commit.short_id,
+            &commit.author,
+            &commit.commit_date
+        ]);
     }
 }
 
@@ -305,16 +324,20 @@ impl HistoryViewable for HistoryView {
 
     fn set_history(&self, commits: &[CommitInfo]) {
         let cursor = self.tree.get_cursor();
-
         self.list_store.clear();
 
-        for commit in commits {
-            self.list_store.insert_with_values(None, &[0, 1, 2, 3], &[
-                &commit.summary,
-                &commit.short_id,
-                &commit.author,
-                &commit.commit_date
-            ]);
+        let mut iter = commits.iter();
+
+        if let Some(first_commit) = iter.next() {
+            if first_commit.is_sentinel() {
+                self.add_to_tree(first_commit);
+            } else {
+                self.add_to_tree_escaped(first_commit);
+            }
+        }
+
+        for commit in iter {
+            self.add_to_tree_escaped(commit);
         }
 
         let col = match cursor.1 {
@@ -325,5 +348,7 @@ impl HistoryViewable for HistoryView {
         if let Some(path) = cursor.0 {
             self.tree.set_cursor(&path, col, false);
         }
+
+        self.tree.show_all();
     }
 }

@@ -24,11 +24,13 @@ pub struct CommitInfo {
     pub commit_date: String
 }
 
+const UNCOMMITTED_STR: &'static str = "<b>Uncommitted changes</b>";
+
 impl CommitInfo {
     pub fn uncommitted_sentinel() -> CommitInfo {
         CommitInfo {
             id: git2::Oid::zero(),
-            summary: "Uncommitted changes".into(),
+            summary: UNCOMMITTED_STR.into(),
             short_id: "*".into(),
             author: "*".into(),
             commit_date: "*".into()
@@ -36,7 +38,7 @@ impl CommitInfo {
     }
 
     pub fn is_sentinel(&self) -> bool {
-        self.id == git2::Oid::zero() && self.summary == "Uncommitted changes"
+        self.id == git2::Oid::zero() && self.summary == UNCOMMITTED_STR
     }
 }
 
