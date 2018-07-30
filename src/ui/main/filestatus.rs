@@ -52,18 +52,29 @@ impl<V: FileStatusViewable> FileStatusPresenter<V> {
     }
 
     fn on_toggle_staged(&self, index: usize) {
+        let parent = self.parent();
+        let repo = parent.repo();
+
+        {
+            let delta = &parent.deltas().borrow().0[index];
+            let head = repo.head().unwrap().peel(git2::ObjectType::Commit).unwrap();
+            repo.reset_default(Some(&head), Path::new(&delta.path)).unwrap();
+        }
+
+        repo.index().unwrap().write().unwrap();
+        parent.on_uncommitted_changes_selected();
     }
 
     fn on_toggle_unstaged(&self, index: usize) {
         let parent = self.parent();
+        let repo = parent.repo();
+
         {
             let delta = &parent.deltas().borrow().1[index];
-
-            println!("{:?}", delta);
-            let repo = parent.repo();
             repo.index().unwrap().add_path(&Path::new(&delta.path)).unwrap();
-            repo.index().unwrap().write().unwrap();
         }
+
+        repo.index().unwrap().write().unwrap();
         parent.on_uncommitted_changes_selected();
     }
 }
