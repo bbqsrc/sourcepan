@@ -4,6 +4,7 @@ extern crate chrono;
 extern crate preferences;
 extern crate notify;
 extern crate glib;
+extern crate gdk;
 
 use std::rc::Rc;
 

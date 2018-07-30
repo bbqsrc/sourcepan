@@ -16,6 +16,7 @@ use ui::AsMessageDialog;
 pub struct BranchPresenter<V> {
     view: RefCell<Weak<V>>,
     repo: Rc<git2::Repository>,
+    deltas: RefCell<(Vec<TreeItem>, Vec<TreeItem>)>,
     branch: String
 }
 
@@ -24,6 +25,7 @@ impl<V: BranchViewable> BranchPresenter<V> {
         BranchPresenter {
             view: RefCell::new(Weak::new()),
             repo: repo,
+            deltas: RefCell::new((vec![], vec![])),
             branch: branch
         }
     }
@@ -34,6 +36,10 @@ impl<V: BranchViewable> BranchPresenter<V> {
 
     pub fn repo(&self) -> &git2::Repository {
         &self.repo
+    }
+
+    pub fn deltas(&self) -> &RefCell<(Vec<TreeItem>, Vec<TreeItem>)> {
+        &self.deltas
     }
 
     pub fn on_uncommitted_changes_selected(&self) {
@@ -53,7 +59,8 @@ impl<V: BranchViewable> BranchPresenter<V> {
             TreeItem {
                 id: d.new_file().id(),
                 path: d.new_file().path().unwrap().to_string_lossy().to_string(),
-                delta: d.status()
+                delta: d.status(),
+                is_selected: true
             }
         }).collect();
 
@@ -61,14 +68,16 @@ impl<V: BranchViewable> BranchPresenter<V> {
             TreeItem {
                 id: d.new_file().id(),
                 path: d.new_file().path().unwrap().to_string_lossy().to_string(),
-                delta: d.status()
+                delta: d.status(),
+                is_selected: false
             }
         })
         .filter(|x| !index_deltas.iter().any(|y| x.id == y.id))
         .collect();
 
-        self.view().set_staged_statuses(&index_deltas);
-        self.view().set_unstaged_statuses(&workdir_deltas);
+        self.view().set_statuses(&index_deltas, &workdir_deltas);
+
+        *self.deltas.borrow_mut() = (index_deltas, workdir_deltas);
     }
 
     pub fn on_commit_selected<'a>(&self, info: &CommitInfo) {
@@ -93,12 +102,12 @@ impl<V: BranchViewable> BranchPresenter<V> {
             TreeItem {
                 id: d.new_file().id(),
                 path: d.new_file().path().unwrap().to_string_lossy().to_string(),
-                delta: d.status()
+                delta: d.status(),
+                is_selected: true
             }
         }).collect();
 
-        self.view().set_staged_statuses(&deltas);
-        self.view().set_unstaged_statuses(&[]);
+        self.view().set_overview_statuses(&deltas, &commit);
     }
 
     pub fn view(&self) -> Rc<V> {
@@ -111,16 +120,15 @@ impl<V: BranchViewable> BranchPresenter<V> {
 pub trait BranchViewable {
     fn new(window: &gtk::Window, repo: Rc<git2::Repository>, branch: String) -> Rc<Self>;
     fn handle_error(&self, error: impl fmt::Display);
-    fn set_staged_statuses(&self, statuses: &[TreeItem]);
-    fn set_unstaged_statuses(&self, statuses: &[TreeItem]);
+    fn set_overview_statuses(&self, statuses: &[TreeItem], commit: &git2::Commit);
+    fn set_statuses(&self, staged: &[TreeItem], unstaged: &[TreeItem]);
 }
 
 #[allow(dead_code)]
 pub struct BranchView {
     presenter: Rc<BranchPresenter<BranchView>>,
     history_view: Rc<HistoryView>,
-    file_status_view: Rc<FileStatusView>,
-    unstaged_view: Rc<FileStatusView>,
+    files_view: Rc<FileStatusView>,
     root: gtk::Paned,
     window: gtk::Window
 }
@@ -129,13 +137,12 @@ impl BranchViewable for BranchView {
     fn new(window: &gtk::Window, repo: Rc<git2::Repository>, branch: String) -> Rc<BranchView> {
         let presenter = Rc::new(BranchPresenter::new(repo, branch));
 
-        let (history_view, file_status_view, unstaged_view, root) = BranchView::create(Rc::downgrade(&presenter));
+        let (history_view, files_view, root) = BranchView::create(Rc::downgrade(&presenter));
 
         let view = view!(BranchView {
             presenter: Rc::clone(&presenter),
             history_view: history_view,
-            file_status_view: file_status_view,
-            unstaged_view: unstaged_view,
+            files_view: files_view,
             root: root,
             window: window.clone()
         });
@@ -149,37 +156,31 @@ impl BranchViewable for BranchView {
         dialog.destroy();
     }
     
-    fn set_staged_statuses(&self, statuses: &[TreeItem]) {
-        self.file_status_view.presenter.set_history_statuses(statuses);
+    fn set_statuses(&self, staged: &[TreeItem], unstaged: &[TreeItem]) {
+        self.files_view.presenter.set_history_statuses(staged, unstaged);
     }
-    
-    fn set_unstaged_statuses(&self, statuses: &[TreeItem]) {
-        self.unstaged_view.presenter.set_history_statuses(statuses);
+
+    fn set_overview_statuses(&self, statuses: &[TreeItem], commit: &git2::Commit) {
+        self.files_view.presenter.set_overview_statuses(statuses, commit);
     }
 }
 
 impl BranchView {
-    fn create(parent: Weak<BranchPresenter<BranchView>>) -> (Rc<HistoryView>, Rc<FileStatusView>, Rc<FileStatusView>, gtk::Paned) {
-        let commit_history = HistoryView::new(parent);
-        let selected_files = FileStatusView::new();
-        let unstaged_files = FileStatusView::new();
+    fn create(parent: Weak<BranchPresenter<BranchView>>) -> (Rc<HistoryView>, Rc<FileStatusView>, gtk::Paned) {
+        let commit_history = HistoryView::new(parent.clone());
+        let files_view = FileStatusView::new(parent.clone());
         let diff_view = gtk::Label::new("Diff view TODO");
 
         let main_pane = gtk::Paned::new(gtk::Orientation::Vertical);
-        let file_pane = gtk::Paned::new(gtk::Orientation::Vertical);
         let bottom_pane = gtk::Paned::new(gtk::Orientation::Horizontal);
 
-        // Add everything to the panes
-        file_pane.pack1(selected_files.widget(), true, true);
-        file_pane.pack2(unstaged_files.widget(), true, true);
-
-        bottom_pane.pack1(&file_pane, true, true);
+        bottom_pane.pack1(files_view.widget(), true, true);
         bottom_pane.pack2(&diff_view, true, true);
 
         main_pane.pack1(commit_history.widget(), true, true);
         main_pane.pack2(&bottom_pane, true, true);
 
-        (commit_history, selected_files, unstaged_files, main_pane)
+        (commit_history, files_view, main_pane)
     }
 
     pub fn widget(&self) -> &gtk::Paned {

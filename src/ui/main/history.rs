@@ -28,6 +28,49 @@ struct HistoryPresenter<V> {
     watcher: RefCell<RecommendedWatcher>
 }
 
+pub trait HumanCommitExt<'a> {
+    fn author_str(&self) -> String;
+    fn id_str(&self) -> String;
+    fn short_id_str(&self) -> String;
+    fn full_summary_str(&'a self) -> &'a str;
+    fn summary_str(&'a self) -> &'a str;
+    fn date(&self) -> chrono::DateTime<chrono::FixedOffset>;
+}
+
+impl<'a> HumanCommitExt<'a> for git2::Commit<'a> {
+    fn author_str(&self) -> String {
+        let author = self.author();
+        let author_name = author.name().unwrap_or("Unknown");
+        let author_email = author.email().unwrap_or("unknown");
+        format!("{} <{}>", &author_name, &author_email)
+    }
+
+    fn id_str(&self) -> String {
+        format!("{}", self.id())
+    }
+
+    fn short_id_str(&self) -> String {
+        self.id_str()[0..7].to_string()
+    }
+    
+    fn full_summary_str(&'a self) -> &'a str {
+        self.summary().unwrap_or("<No summary found>")
+    }
+
+    fn summary_str(&'a self) -> &'a str {
+        let full_summary = self.full_summary_str();
+        &full_summary[0..min(80, full_summary.len())]
+    }
+
+    fn date(&self) -> chrono::DateTime<chrono::FixedOffset> {
+        let time = self.time();
+        let naive_dt = chrono::Utc.timestamp(time.seconds(), 0).naive_utc();
+        let offset = chrono::offset::FixedOffset::east(time.offset_minutes() * 60);
+        let date: chrono::DateTime<chrono::FixedOffset> = chrono::DateTime::from_utc(naive_dt, offset);
+        date
+    }
+}
+
 impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
     fn new(parent: Weak<BranchPresenter<BranchView>>) -> Rc<HistoryPresenter<V>> {
         let (tx, rx) = channel();
@@ -130,26 +173,14 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
                 Err(_) => continue
             };
 
-            let commit = (&parent.repo()).find_commit(rev).expect("commit to be found");
-
-            let author = commit.author();
-            let subid = &format!("{}", commit.id())[0..7];
-            let full_summary = commit.summary().expect("valid summary");
-            let summary = &format!("{}", &full_summary)[0..min(80, full_summary.len())];
-
-            let naive_dt = chrono::Utc.timestamp(commit.time().seconds(), 0).naive_utc();
-            let offset = chrono::offset::FixedOffset::east(commit.time().offset_minutes() * 60);
-            let date: chrono::DateTime<chrono::FixedOffset> = chrono::DateTime::from_utc(naive_dt, offset);
-
-            let author_name = author.name().expect("valid author name");
-            let author_email = author.email().expect("valid author email");
+            let commit = parent.repo().find_commit(rev).expect("commit to be found");
 
             let info = CommitInfo {
                 id: commit.id(),
-                summary: summary.to_string(),
-                short_id: subid.to_string(),
-                author: format!("{} <{}>", &author_name, &author_email),
-                commit_date: date.to_string()
+                summary: commit.summary_str().to_string(),
+                short_id: commit.short_id_str().to_string(),
+                author: commit.author_str().to_string(),
+                commit_date: commit.date().to_string()
             };
 
             infos.push(info);

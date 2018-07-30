@@ -300,5 +300,6 @@ impl MainWindow {
 pub struct TreeItem {
     id: git2::Oid,
     path: String,
-    delta: git2::Delta
+    delta: git2::Delta,
+    is_selected: bool
 }
