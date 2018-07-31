@@ -83,7 +83,7 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
             watcher: RefCell::new(Watcher::new(tx, Duration::from_secs(2)).unwrap())
         });
 
-        gtk::idle_add(weak!(presenter => move || {
+        gtk::timeout_add(50, weak!(presenter => move || {
             match rx.try_recv() {
                 Err(err) => {
                     match err {
