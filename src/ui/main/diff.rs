@@ -4,6 +4,7 @@ use git2;
 use gtk::prelude::*;
 use gtk;
 use gdk;
+use pango;
 
 trait DiffViewable {
 
@@ -40,7 +41,6 @@ impl DiffView {
         let root = gtk::ScrolledWindow::new(None, None);
         root.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
         root.add(&container);
-        // root.get_style_context().unwrap().add_class("diff-container");
 
         DiffView {
             root,
@@ -85,14 +85,15 @@ impl DiffFileView {
     pub fn new(patch: git2::Patch, path: &str) -> DiffFileView {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.get_style_context().unwrap().add_class("file-border");
+        
         let label = gtk::Label::new(path);
         label.set_xalign(0.0);
+        label.set_ellipsize(pango::EllipsizeMode::Middle);
         label.get_style_context().unwrap().add_class("file-label");
 
         root.add(&label);
 
         for hunk_idx in 0..patch.num_hunks() {
-            // TODO: multiple tree views for the hunks
             let hunk = patch.hunk(hunk_idx).unwrap().0;
             let header = ::std::str::from_utf8(hunk.header()).unwrap();
 
@@ -119,6 +120,7 @@ impl DiffChunkView {
         let label = gtk::Label::new(header.trim());
         label.set_xalign(0.0);
         label.get_style_context().unwrap().add_class("diff-label");
+        label.set_ellipsize(pango::EllipsizeMode::Middle);
 
         let count_tree = gtk::TreeView::new();
         count_tree.get_style_context().unwrap().add_class("line-count");
@@ -152,6 +154,10 @@ impl DiffChunkView {
         fn append_column(tree: &gtk::TreeView, id: i32, title: &str, is_colored: bool) -> gtk::TreeViewColumn {
             let column = gtk::TreeViewColumn::new();
             let cell = gtk::CellRendererText::new();
+
+            if id <= 2 {
+                cell.set_alignment(0.5, 0.5);
+            }
 
             column.pack_start(&cell, true);
             column.set_resizable(true);

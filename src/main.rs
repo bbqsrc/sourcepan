@@ -5,6 +5,7 @@ extern crate preferences;
 extern crate notify;
 extern crate glib;
 extern crate gdk;
+extern crate pango;
 
 use std::rc::Rc;
 
