@@ -172,6 +172,7 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
             revwalk.push_ref(refr).expect("push ref successfully");
             revwalk.push(first_commit).unwrap();
             revwalk.push_glob("heads/*").unwrap();
+            revwalk.push_glob("remotes/*").unwrap();
             revwalk
         };
 
