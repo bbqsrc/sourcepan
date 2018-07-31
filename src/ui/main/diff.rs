@@ -28,21 +28,23 @@ impl DiffChunkViewable for DiffChunkView {
 pub struct DiffView {
     root: gtk::ScrolledWindow,
     container: gtk::Box,
-    chunks: RefCell<Vec<DiffChunkView>>
+    files: RefCell<Vec<DiffFileView>>
 }
 
 impl DiffView {
     pub fn new() -> DiffView {
         let container = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        container.get_style_context().unwrap().add_class("diff-container");
 
         let root = gtk::ScrolledWindow::new(None, None);
         root.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
         root.add(&container);
+        // root.get_style_context().unwrap().add_class("diff-container");
 
         DiffView {
             root,
             container,
-            chunks: RefCell::new(vec![])
+            files: RefCell::new(vec![])
         }
     }
 
@@ -57,12 +59,12 @@ impl DiffView {
             let mut patch = git2::Patch::from_diff(&diff, n).unwrap().unwrap();
             let path = d.new_file().path().unwrap().to_string_lossy();
 
-            let view = DiffChunkView::new(patch, &path);
+            let view = DiffFileView::new(patch, &path);
             self.container.add(view.widget());
             views.push(view);
         }
 
-        *self.chunks.borrow_mut() = views;
+        *self.files.borrow_mut() = views;
 
         self.container.show_all();
     }
@@ -72,10 +74,47 @@ impl DiffView {
     }
 }
 
-impl DiffChunkView {
-    pub fn new(mut patch: git2::Patch, path: &str) -> DiffChunkView {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 2);
+#[allow(dead_code)]
+struct DiffFileView {
+    root: gtk::Box,
+    label: gtk::Label
+}
+
+impl DiffFileView {
+    pub fn new(patch: git2::Patch, path: &str) -> DiffFileView {
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.get_style_context().unwrap().add_class("file-border");
         let label = gtk::Label::new(path);
+        label.set_xalign(0.0);
+        label.get_style_context().unwrap().add_class("file-label");
+
+        root.add(&label);
+
+        for hunk_idx in 0..patch.num_hunks() {
+            // TODO: multiple tree views for the hunks
+            let hunk = patch.hunk(hunk_idx).unwrap().0;
+            let header = ::std::str::from_utf8(hunk.header()).unwrap();
+
+            let chunk_view = DiffChunkView::new(&patch, header, hunk_idx);
+            root.add(chunk_view.widget());
+        }
+
+        DiffFileView {
+            root,
+            label
+        }
+    }
+
+    pub fn widget(&self) -> &gtk::Box {
+        &self.root
+    }
+}
+
+impl DiffChunkView {
+    pub fn new(patch: &git2::Patch, header: &str, hunk_idx: usize) -> DiffChunkView {
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.get_style_context().unwrap().add_class("tree-border");
+        let label = gtk::Label::new(header.trim());
         label.set_xalign(0.0);
         label.get_style_context().unwrap().add_class("diff-label");
         let tree = gtk::TreeView::new();
@@ -128,36 +167,33 @@ impl DiffChunkView {
         
         tree.set_model(&list_store);
 
-        for i_hunk in 0..patch.num_hunks() {
-            // TODO: multiple tree views for the hunks
-            for i in 0..patch.num_lines_in_hunk(i_hunk).unwrap() {
-                let line = patch.line_in_hunk(i_hunk, i).unwrap();
+        for i in 0..patch.num_lines_in_hunk(hunk_idx).unwrap() {
+            let line = patch.line_in_hunk(hunk_idx, i).unwrap();
 
-                let rgba = match line.origin() {
-                    '>' | '+' => gdk::RGBA {
-                        red: 0.851,
-                        green: 0.91,
-                        blue: 0.812,
-                        alpha: 1.0
-                    },
-                    '<' | '-' => gdk::RGBA {
-                        red: 0.918,
-                        green: 0.835,
-                        blue: 0.835,
-                        alpha: 1.0
-                    },
-                    _ => gdk::RGBA::white()
-                };
+            let rgba = match line.origin() {
+                '>' | '+' => gdk::RGBA {
+                    red: 0.851,
+                    green: 0.925,
+                    blue: 0.812,
+                    alpha: 1.0
+                },
+                '<' | '-' => gdk::RGBA {
+                    red: 0.918,
+                    green: 0.835,
+                    blue: 0.835,
+                    alpha: 1.0
+                },
+                _ => gdk::RGBA::white()
+            };
 
-                (&list_store).insert_with_values(None, &[0, 1, 2, 3, 4, 5], &[
-                    &rgba,
-                    &line.old_lineno().map(|x| x.to_string()).unwrap_or("".to_string()),
-                    &line.new_lineno().map(|x| x.to_string()).unwrap_or("".to_string()),
-                    &line.origin().to_string(),
-                    &::std::str::from_utf8(line.content()).unwrap_or("<unknown>").trim_right(),
-                    &gdk::RGBA { red: 0.9, green: 0.9, blue: 0.9, alpha: 1.0 }
-                ]);
-            }
+            (&list_store).insert_with_values(None, &[0, 1, 2, 3, 4, 5], &[
+                &rgba,
+                &line.old_lineno().map(|x| x.to_string()).unwrap_or("".to_string()),
+                &line.new_lineno().map(|x| x.to_string()).unwrap_or("".to_string()),
+                &line.origin().to_string(),
+                &::std::str::from_utf8(line.content()).unwrap_or("<unknown>").trim_right(),
+                &gdk::RGBA { red: 0.9, green: 0.9, blue: 0.9, alpha: 1.0 }
+            ]);
         }
         
         root.show_all();

@@ -9,6 +9,31 @@
     padding: 0;
 }
 
+.file-label {
+    padding: 8px;
+    border-bottom: 1px solid #ccc;
+}
+
 .diff-label {
     padding: 8px;
+    padding-left: 52px;
+    border-bottom: 1px solid #ccc;
+}
+
+.file-border {
+    background-color: #eee;
+    border: 1px solid #bbb;
+    border-bottom: 0;
+    margin: 8px;
+    margin-bottom: 0px;
+}
+
+.tree-border {
+    border-bottom: 1px solid #ccc;
+}
+
+.diff-container {
+    background-image: none;
+    background-color: white;
+    padding-bottom: 8px;
 }
