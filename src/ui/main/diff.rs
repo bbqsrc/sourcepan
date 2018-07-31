@@ -6,6 +6,8 @@ use gtk;
 use gdk;
 use pango;
 
+const NO_NL_STR: &'static str = "No newline at end of file";
+
 trait DiffViewable {
 
 }
@@ -112,6 +114,36 @@ impl DiffFileView {
     }
 }
 
+trait HumanDiffLineExt<'a> {
+    fn origin_human(&self) -> char;
+    fn content_str(&self) -> Option<&str>;
+}
+
+impl<'a> HumanDiffLineExt<'a> for git2::DiffLine<'a> {
+    fn origin_human(&self) -> char {
+        let ch = self.origin();
+        match ch {
+            '=' | '>' | '<' => '\\',
+            _ => ch
+        }
+    }
+
+    fn content_str(&self) -> Option<&str> {
+        match ::std::str::from_utf8(self.content()) {
+            Ok(v) => {
+                // Check for weird NL string
+                if v.trim_right().ends_with(NO_NL_STR) {
+                    Some(NO_NL_STR)
+                } else {
+                    Some(v.trim_right())
+                }
+            },
+            Err(_) => None
+        }
+    }
+                
+}
+
 impl DiffChunkView {
     pub fn new(patch: &git2::Patch, header: &str, hunk_idx: usize) -> DiffChunkView {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -194,13 +226,13 @@ impl DiffChunkView {
             let line = patch.line_in_hunk(hunk_idx, i).unwrap();
 
             let rgba = match line.origin() {
-                '>' | '+' => gdk::RGBA {
+                '<' | '+' => gdk::RGBA {
                     red: 0.851,
                     green: 0.925,
                     blue: 0.812,
                     alpha: 1.0
                 },
-                '<' | '-' => gdk::RGBA {
+                '>' | '-' => gdk::RGBA {
                     red: 0.918,
                     green: 0.835,
                     blue: 0.835,
@@ -213,8 +245,8 @@ impl DiffChunkView {
                 &rgba,
                 &line.old_lineno().map(|x| x.to_string()).unwrap_or("".to_string()),
                 &line.new_lineno().map(|x| x.to_string()).unwrap_or("".to_string()),
-                &line.origin().to_string(),
-                &::std::str::from_utf8(line.content()).unwrap_or("<unknown>").trim_right(),
+                &line.origin_human().to_string(),
+                &line.content_str().unwrap_or("<unknown>"),
                 &gdk::RGBA { red: 0.95, green: 0.95, blue: 0.95, alpha: 1.0 }
             ]);
         }
