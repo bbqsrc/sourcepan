@@ -37,3 +37,8 @@
     background-color: white;
     padding-bottom: 8px;
 }
+
+.line-count {
+    font-size: 80%;
+    color: #999;
+}

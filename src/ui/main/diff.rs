@@ -17,7 +17,8 @@ trait DiffChunkViewable {
 pub struct DiffChunkView {
     list_store: gtk::ListStore,
     label: gtk::Label,
-    tree: gtk::TreeView,
+    lines_tree: gtk::TreeView,
+    count_tree: gtk::TreeView,
     root: gtk::Box
 }
 
@@ -114,13 +115,18 @@ impl DiffChunkView {
     pub fn new(patch: &git2::Patch, header: &str, hunk_idx: usize) -> DiffChunkView {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.get_style_context().unwrap().add_class("tree-border");
+
         let label = gtk::Label::new(header.trim());
         label.set_xalign(0.0);
         label.get_style_context().unwrap().add_class("diff-label");
-        let tree = gtk::TreeView::new();
 
-        tree.get_style_context().unwrap().add_class("monospace");
-        tree.get_selection().set_mode(gtk::SelectionMode::Multiple);
+        let count_tree = gtk::TreeView::new();
+        count_tree.get_style_context().unwrap().add_class("line-count");
+        count_tree.get_selection().set_mode(gtk::SelectionMode::None);
+
+        let lines_tree = gtk::TreeView::new();
+        lines_tree.get_style_context().unwrap().add_class("monospace");
+        lines_tree.get_selection().set_mode(gtk::SelectionMode::Multiple);
 
         let list_store = gtk::ListStore::new(&[
             gdk::RGBA::static_type(),
@@ -131,8 +137,17 @@ impl DiffChunkView {
             gdk::RGBA::static_type()
         ]);
 
+        let trees_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        trees_box.add(&count_tree);
+
+        let scroller = gtk::ScrolledWindow::new(None, None);
+        scroller.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Never);
+        scroller.add(&lines_tree);
+        scroller.set_hexpand(true);
+        trees_box.add(&scroller);
+
         root.add(&label);
-        root.add(&tree);
+        root.add(&trees_box);
 
         fn append_column(tree: &gtk::TreeView, id: i32, title: &str, is_colored: bool) -> gtk::TreeViewColumn {
             let column = gtk::TreeViewColumn::new();
@@ -158,14 +173,16 @@ impl DiffChunkView {
         column.pack_start(&cell, true);
         column.set_visible(false);
         
-        append_column(&tree, 1, "Old", false);
-        append_column(&tree, 2, "New", false);
-        append_column(&tree, 3, "Origin", true);
-        append_column(&tree, 4, "Line", true);
+        append_column(&count_tree, 1, "Old", false);
+        append_column(&count_tree, 2, "New", false);
+        append_column(&lines_tree, 3, "Origin", true);
+        append_column(&lines_tree, 4, "Line", true);
 
-        tree.set_headers_visible(false);
+        count_tree.set_headers_visible(false);
+        lines_tree.set_headers_visible(false);
         
-        tree.set_model(&list_store);
+        count_tree.set_model(&list_store);
+        lines_tree.set_model(&list_store);
 
         for i in 0..patch.num_lines_in_hunk(hunk_idx).unwrap() {
             let line = patch.line_in_hunk(hunk_idx, i).unwrap();
@@ -192,7 +209,7 @@ impl DiffChunkView {
                 &line.new_lineno().map(|x| x.to_string()).unwrap_or("".to_string()),
                 &line.origin().to_string(),
                 &::std::str::from_utf8(line.content()).unwrap_or("<unknown>").trim_right(),
-                &gdk::RGBA { red: 0.9, green: 0.9, blue: 0.9, alpha: 1.0 }
+                &gdk::RGBA { red: 0.95, green: 0.95, blue: 0.95, alpha: 1.0 }
             ]);
         }
         
@@ -201,7 +218,8 @@ impl DiffChunkView {
         DiffChunkView {
             list_store,
             label,
-            tree,
+            count_tree,
+            lines_tree,
             root
         }
     }
