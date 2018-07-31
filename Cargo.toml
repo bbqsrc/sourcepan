@@ -2,6 +2,7 @@
 name = "sourcepan"
 version = "0.1.0"
 authors = ["Brendan Molloy <brendan@bbqsrc.net>"]
+license = "GPL-3.0"
 
 [dependencies]
 git2 = { git = "https://github.com/bbqsrc/git2-rs", branch = "fix/unneeded-mut" }
