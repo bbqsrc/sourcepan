@@ -58,7 +58,8 @@ pub trait InitViewable {
 
 pub struct InitWindow {
     presenter: InitPresenter<InitWindow>,
-    window: gtk::Window
+    window: gtk::Window,
+    main_window: RefCell<Option<Rc<MainWindow>>>
 }
 
 impl InitWindow {
@@ -87,7 +88,8 @@ impl InitViewable for InitWindow {
 
         let view = view!(InitWindow {
             presenter: InitPresenter::new(),
-            window: window
+            window: window,
+            main_window: RefCell::new(None)
         });
 
         open_button.connect_clicked(weak!(view => move |_| {
@@ -136,5 +138,8 @@ impl InitViewable for InitWindow {
         self.hide();
         let main_window = MainWindow::with_repo(repo);
         main_window.show();
+
+        // TODO: remove this terrible hack; use a window mgr
+        *self.main_window.borrow_mut() = Some(main_window);
     }
 }
