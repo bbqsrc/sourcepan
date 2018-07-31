@@ -159,14 +159,37 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
         let parent = self.parent();
         let branch = &parent.repo().find_branch(&self.parent().branch(), git2::BranchType::Local).expect("find branch");
         let refr = branch.get().name().expect("find branch name as ref");
-        let mut revwalk = (&parent.repo()).revwalk().expect("get a revwalk");
-        revwalk.push_ref(refr).expect("push ref successfully");
+
+        let revwalk = {
+            let mut revwalk = (&parent.repo()).revwalk().expect("get a revwalk");
+            revwalk.push_head().expect("head can be pushed");
+            let first_commit = revwalk.next().unwrap().unwrap();
+
+            let mut revwalk = (&parent.repo()).revwalk().expect("get a revwalk");
+            let mut sort = git2::Sort::TIME;
+            sort.insert(git2::Sort::TOPOLOGICAL);
+            revwalk.set_sorting(sort);
+            revwalk.push_ref(refr).expect("push ref successfully");
+            revwalk.push(first_commit).unwrap();
+            revwalk.push_glob("heads/*").unwrap();
+            revwalk
+        };
+
 
         let mut infos = vec![];
 
         if self.has_uncommitted_changes() {
             infos.push(CommitInfo::uncommitted_sentinel());
         }
+
+        let branches: Vec<(String, git2::Commit)> = parent.repo().branches(None).unwrap()
+            .map(|branch| {
+                let branch = branch.unwrap().0;
+                let name = branch.name().unwrap().unwrap().to_string();
+                let commit = branch.get().peel_to_commit().unwrap();
+                (name, commit)
+            })
+            .collect();
 
         for rev in revwalk {
             let rev = match rev {
@@ -175,13 +198,19 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
             };
 
             let commit = parent.repo().find_commit(rev).expect("commit to be found");
+            
+            let branch_heads: Vec<String> = branches.iter()
+                .filter(|(_, tip_commit)| tip_commit.id() == commit.id())
+                .map(|(name, _)| name.clone())
+                .collect();
 
             let info = CommitInfo {
                 id: commit.id(),
                 summary: commit.summary_str().to_string(),
                 short_id: commit.short_id_str().to_string(),
                 author: commit.author_str().to_string(),
-                commit_date: commit.date().to_string()
+                commit_date: commit.date().to_string(),
+                branch_heads: branch_heads
             };
 
             infos.push(info);
@@ -253,7 +282,7 @@ impl HistoryView {
 
     fn add_to_tree_escaped(&self, commit: &CommitInfo) {
         self.list_store.insert_with_values(None, &[0, 1, 2, 3], &[
-            &markup_escape_text(&commit.summary),
+            &markup_escape_text(&commit.summary()),
             &markup_escape_text(&commit.short_id),
             &markup_escape_text(&commit.author),
             &markup_escape_text(&commit.commit_date)
@@ -262,7 +291,7 @@ impl HistoryView {
 
     fn add_to_tree(&self, commit: &CommitInfo) {
         self.list_store.insert_with_values(None, &[0, 1, 2, 3], &[
-            &commit.summary,
+            &commit.summary(),
             &commit.short_id,
             &commit.author,
             &commit.commit_date

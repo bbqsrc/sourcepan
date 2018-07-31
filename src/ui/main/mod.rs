@@ -19,10 +19,27 @@ use ui::AsMessageDialog;
 #[derive(Debug)]
 pub struct CommitInfo {
     pub id: git2::Oid,
-    pub summary: String,
+    summary: String,
     pub short_id: String,
     pub author: String,
-    pub commit_date: String
+    pub commit_date: String,
+    pub branch_heads: Vec<String>
+}
+
+impl CommitInfo {
+    pub fn summary(&self) -> String {
+        if self.branch_heads.len() == 0 {
+            return self.summary.to_string();
+        }
+
+        let mut out = String::new();
+        
+        for name in &self.branch_heads {
+            out.push_str(&format!("[{}] ", &name));
+        }
+        out.push_str(&self.summary);
+        out
+    } 
 }
 
 const UNCOMMITTED_STR: &'static str = "<b>Uncommitted changes</b>";
@@ -34,7 +51,8 @@ impl CommitInfo {
             summary: UNCOMMITTED_STR.into(),
             short_id: "*".into(),
             author: "*".into(),
-            commit_date: "*".into()
+            commit_date: "*".into(),
+            branch_heads: vec![]
         }
     }
 
@@ -128,6 +146,12 @@ impl MainViewable for MainWindow {
     fn with_repo(repo: git2::Repository) -> Rc<Self> {
         let (window, header) = MainWindow::create();
 
+
+        for refr in (&repo).references_glob("refs/heads/*/*").unwrap() {
+            let refr = refr.unwrap();
+            println!("{:?} {:?}", &refr.name(), &refr.kind());
+        }
+
         let view = view!(MainWindow {
             presenter: MainPresenter::new(repo),
             header: header,
@@ -142,7 +166,6 @@ impl MainViewable for MainWindow {
                 panic!("MainWindow open_button failed to resolve weak parent view");
             }
         }));
-
         view.presenter.start();
 
         view
