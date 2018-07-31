@@ -77,6 +77,7 @@ impl<V: BranchViewable> BranchPresenter<V> {
         .collect();
 
         self.view().set_statuses(&index_deltas, &workdir_deltas);
+        self.view().set_diff(index_diff);
 
         *self.deltas.borrow_mut() = (index_deltas, workdir_deltas);
     }
