@@ -26,6 +26,7 @@ use git2;
 use gtk::prelude::*;
 use gtk;
 use glib::markup_escape_text;
+use pango;
 
 use super::branch::{BranchPresenter, BranchView, BranchViewable};
 use super::CommitInfo;
@@ -274,23 +275,29 @@ pub struct HistoryView {
 
 impl HistoryView {
     fn create_tree(model: &gtk::ListStore) -> gtk::TreeView {
-        fn append_column(tree: &gtk::TreeView, id: i32, title: &str) {
+        fn append_column(tree: &gtk::TreeView, id: i32, title: &str, is_expand: bool) {
             let column = gtk::TreeViewColumn::new();
             let cell = gtk::CellRendererText::new();
 
             column.pack_start(&cell, true);
+            column.set_expand(is_expand);
             column.set_resizable(true);
             column.set_title(title);
             column.add_attribute(&cell, "markup", id);
+
+            cell.set_property("width-chars", &12).unwrap();
+            cell.set_property("ellipsize-set", &true).unwrap();
+            cell.set_property("ellipsize", &pango::EllipsizeMode::End).unwrap();
+
             tree.append_column(&column);
         }
 
         let treeview = gtk::TreeView::new();
 
-        append_column(&treeview, 0, "Summary");
-        append_column(&treeview, 1, "Commit");
-        append_column(&treeview, 2, "Author");
-        append_column(&treeview, 3, "Date");
+        append_column(&treeview, 0, "Summary", true);
+        append_column(&treeview, 1, "Commit", false);
+        append_column(&treeview, 2, "Author", true);
+        append_column(&treeview, 3, "Date", true);
 
         treeview.set_model(model);
         treeview
@@ -332,6 +339,7 @@ impl HistoryViewable for HistoryView {
 
         // Make tree view scrollable
         let root = gtk::ScrolledWindow::new(None, None);
+        root.set_hexpand(true);
         root.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
         root.add(&treeview);
 
