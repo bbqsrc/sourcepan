@@ -84,6 +84,7 @@ struct MainPresenter<V> {
 pub trait MainViewable {
     fn with_repo(repo: git2::Repository) -> Rc<Self>;
     fn set_branches(&self, repo: Rc<git2::Repository>, branches: Vec<String>);
+    fn set_branch_by_index(&self, index: usize);
     fn show(&self);
     fn set_title(&self, path: &str);
     fn open_repo_selector(&self);
@@ -91,10 +92,10 @@ pub trait MainViewable {
 }
 
 impl<V: MainViewable> MainPresenter<V> {
-    fn new(repo: git2::Repository) -> MainPresenter<V> {
+    fn new(repo: Rc<git2::Repository>) -> MainPresenter<V> {
         MainPresenter {
             view: RefCell::new(Weak::new()),
-            repo: RefCell::new(Rc::new(repo))
+            repo: RefCell::new(repo)
         }
     }
 
@@ -152,26 +153,42 @@ pub struct MainWindow {
     presenter: MainPresenter<MainWindow>,
     header: MainWindowHeader,
     window: gtk::Window,
-    branch_views: RefCell<Vec<Rc<BranchView>>>
+    sidebar_view: Rc<SidebarView>,
+    branch_view: Rc<BranchView>,
+    branches: RefCell<Vec<String>>
 }
 
 impl Window for MainWindow {}
 
 impl MainViewable for MainWindow {
     fn with_repo(repo: git2::Repository) -> Rc<Self> {
-        let (window, header) = MainWindow::create();
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.set_title("Sourcepan");
+        window.set_default_size(1024, 768);
 
+        let header = MainWindow::create_header();
+        window.set_titlebar(header.widget());
 
-        for refr in (&repo).references_glob("refs/heads/*/*").unwrap() {
-            let refr = refr.unwrap();
-            println!("{:?} {:?}", &refr.name(), &refr.kind());
-        }
+        let sidebar_view = MainWindow::create_sidebar();
+
+        window.add(&sidebar_view.root);
+
+        window.connect_delete_event(|_, _| {
+            gtk::main_quit();
+            Inhibit(false)
+        });
+
+        let repo = Rc::new(repo);
+        let branch_view = BranchView::new(&window, Rc::clone(&repo));
+        sidebar_view.root.add2(branch_view.widget());
 
         let view = view!(MainWindow {
-            presenter: MainPresenter::new(repo),
-            header: header,
-            window: window,
-            branch_views: RefCell::new(vec![])
+            presenter: MainPresenter::new(Rc::clone(&repo)),
+            header,
+            window,
+            sidebar_view: Rc::new(sidebar_view),
+            branch_view,
+            branches: RefCell::new(vec![])
         });
         
         view.header.open_button.connect_clicked(weak!(view => move |_| {
@@ -181,6 +198,27 @@ impl MainViewable for MainWindow {
                 panic!("MainWindow open_button failed to resolve weak parent view");
             }
         }));
+
+        {
+            // let sidebar_view = &view.sidebar_view;
+            view.sidebar_view.tree_view.connect_cursor_changed(weak!(view => move |_| {
+                if let Some(view) = view.upgrade() {
+                    let idxs = view.sidebar_view.tree_view.get_cursor().0.unwrap().get_indices();
+                    if idxs.len() < 2 {
+                        return;
+                    }
+
+                    let branch_idx = idxs[1];
+
+                    if branch_idx >= 0 {
+                        view.set_branch_by_index(branch_idx as usize);
+                    }
+                } else {
+                    panic!("Sidebar not found in weak reference counter for tree selection");
+                }
+            }));
+        }
+
         view.presenter.start();
 
         view
@@ -193,18 +231,16 @@ impl MainViewable for MainWindow {
     }
     
     fn set_branches(&self, repo: Rc<git2::Repository>, branches: Vec<String>) {
-        let stack = MainWindow::create_sidebar(&self.window);
-        let mut branch_views = vec![];
+        self.branch_view.set_branch(&branches[0]);
+        self.sidebar_view.set_branches(&branches);
 
-        for name in branches.into_iter() {
-            let branch_view = BranchView::new(&self.window, Rc::clone(&repo), name.to_string());
-            &stack.add_titled(branch_view.widget(), &format!("branch-{}", name), &name);
-            branch_views.push(branch_view);
-        }
-
-        *self.branch_views.borrow_mut() = branch_views;
+        *self.branches.borrow_mut() = branches;
 
         self.window.show_all();
+    }
+
+    fn set_branch_by_index(&self, index: usize) {
+        self.branch_view.set_branch(&self.branches.borrow()[index])
     }
 
     fn open_repo_selector(&self) {
@@ -245,31 +281,70 @@ impl MainWindowHeader {
     }
 }
 
-impl MainWindow {
-    fn create_sidebar(window: &gtk::Window) -> gtk::Stack {
-        // Remove the entire grid and recreate if exists.
-        if let Some(child) = window.get_children().first() {
-            if let Some(name) = <gtk::Widget as WidgetExt>::get_name(child) {
-                if name == "GtkGrid" {
-                    window.remove(child);
-                }
-            }
+struct SidebarView {
+    tree_store: gtk::TreeStore,
+    branch_iter: RefCell<gtk::TreeIter>,
+    tree_view: gtk::TreeView,
+    root: gtk::Paned
+}
+
+impl SidebarView {
+    fn set_branches(&self, branches: &Vec<String>) {
+        let branch_iter = self.tree_store.insert_with_values(None, None, &[0], &[&"Branches"]);
+
+        for branch in branches {
+            self.tree_store.insert_with_values(Some(&branch_iter), None, &[0], &[&branch]);
         }
-
-        let sidebar = gtk::StackSidebar::new();
-        let main_box = gtk::Grid::new();
-
-        let stack = gtk::Stack::new();
-        stack.set_vexpand(true);
-        stack.set_hexpand(true);
-        sidebar.set_stack(&stack);
-
-        main_box.attach(&sidebar, 0, 0, 1, 1);
-        main_box.attach(&stack, 1, 0, 1, 1);
         
-        window.add(&main_box);
+        {
+            let iter = self.branch_iter.borrow();
+            self.tree_store.swap(&branch_iter, &*iter);
+            self.tree_store.remove(&iter);
+        }
         
-        stack
+        *self.branch_iter.borrow_mut() = branch_iter;
+        self.tree_view.expand_all();
+    }
+}
+
+impl MainWindow {
+    fn create_sidebar() -> SidebarView {
+        let tree_store = gtk::TreeStore::new(&[
+            String::static_type()
+        ]);
+
+        let branch_iter = tree_store.insert_with_values(None, None, &[0], &[&"Branches"]);
+        tree_store.insert_with_values(Some(&branch_iter), None, &[0], &[&"master"]);
+
+        let tree_view = gtk::TreeView::new();
+        tree_view.set_model(&tree_store);
+        tree_view.set_headers_visible(false);
+
+        let renderer_name = gtk::CellRendererText::new();
+        let column_name = gtk::TreeViewColumn::new();
+        column_name.pack_start(&renderer_name, true);
+        column_name.set_resizable(false);
+        column_name.add_attribute(&renderer_name, "text", 0);
+        tree_view.append_column(&column_name);
+        tree_view.expand_all();
+
+        let root = gtk::Paned::new(gtk::Orientation::Horizontal);
+        root.set_vexpand(true);
+        root.set_hexpand(true);
+        root.add1(&tree_view);
+
+        // main_box.attach(&sidebar, 0, 0, 1, 1);
+        // main_box.attach(&stack, 1, 0, 1, 1);
+        
+        // window.add(&main_box);
+        // window.add(&stack);
+        
+        SidebarView {
+            tree_store,
+            branch_iter: RefCell::new(branch_iter),
+            tree_view,
+            root
+        }
     }
 
     fn create_header() -> MainWindowHeader {
@@ -316,24 +391,6 @@ impl MainWindow {
             root: header_bar,
             open_button: open_button
         }
-    }
-
-    fn create() -> (gtk::Window, MainWindowHeader) {
-        let window = gtk::Window::new(gtk::WindowType::Toplevel);
-        window.set_title("Sourcepan");
-        window.set_default_size(1024, 768);
-
-        let header = MainWindow::create_header();
-        window.set_titlebar(header.widget());
-
-        let _ = MainWindow::create_sidebar(&window);
-
-        window.connect_delete_event(|_, _| {
-            gtk::main_quit();
-            Inhibit(false)
-        });
-
-        (window, header)
     }
 }
 

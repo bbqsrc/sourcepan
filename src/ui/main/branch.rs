@@ -33,21 +33,25 @@ pub struct BranchPresenter<V> {
     view: RefCell<Weak<V>>,
     repo: Rc<git2::Repository>,
     deltas: RefCell<(Vec<TreeItem>, Vec<TreeItem>)>,
-    branch: String
+    branch: RefCell<String>
 }
 
 impl<V: BranchViewable> BranchPresenter<V> {
-    fn new(repo: Rc<git2::Repository>, branch: String) -> BranchPresenter<V> {
+    fn new(repo: Rc<git2::Repository>) -> BranchPresenter<V> {
+         let branch = {
+            let repo = repo.clone();
+            let first_branch = repo.branches(None).unwrap()
+                .next().unwrap().unwrap();
+            first_branch.0.name().unwrap().unwrap()
+                .to_string()
+        };
+
         BranchPresenter {
             view: RefCell::new(Weak::new()),
             repo: repo,
             deltas: RefCell::new((vec![], vec![])),
-            branch: branch
+            branch: RefCell::new(branch)
         }
-    }
-
-    pub fn branch(&self) -> &str {
-        &self.branch
     }
 
     pub fn repo(&self) -> &git2::Repository {
@@ -56,6 +60,16 @@ impl<V: BranchViewable> BranchPresenter<V> {
 
     pub fn deltas(&self) -> &RefCell<(Vec<TreeItem>, Vec<TreeItem>)> {
         &self.deltas
+    }
+
+    pub fn branch(&self) -> &RefCell<String> {
+        &self.branch
+    }
+
+    pub fn set_branch(&self, branch: &str) {
+        *self.branch.borrow_mut() = branch.to_string();
+
+        self.view().refresh_commit_history();
     }
 
     pub fn on_uncommitted_changes_selected(&self) {
@@ -136,11 +150,12 @@ impl<V: BranchViewable> BranchPresenter<V> {
 }
 
 pub trait BranchViewable {
-    fn new(window: &gtk::Window, repo: Rc<git2::Repository>, branch: String) -> Rc<Self>;
     fn handle_error(&self, error: impl fmt::Display);
     fn set_overview_statuses(&self, statuses: &[TreeItem], commit: &git2::Commit);
     fn set_statuses(&self, staged: &[TreeItem], unstaged: &[TreeItem]);
     fn set_diff(&self, diff: git2::Diff);
+    fn set_branch(&self, branch: &str);
+    fn refresh_commit_history(&self);
 }
 
 #[allow(dead_code)]
@@ -154,21 +169,12 @@ pub struct BranchView {
 }
 
 impl BranchViewable for BranchView {
-    fn new(window: &gtk::Window, repo: Rc<git2::Repository>, branch: String) -> Rc<BranchView> {
-        let presenter = Rc::new(BranchPresenter::new(repo, branch));
+    fn set_branch(&self, branch: &str) {
+        self.presenter.set_branch(branch);
+    }
 
-        let (history_view, files_view, diff_view, root) = BranchView::create(Rc::downgrade(&presenter));
-
-        let view = view!(BranchView {
-            presenter: Rc::clone(&presenter),
-            history_view, 
-            files_view,
-            diff_view,
-            root: root,
-            window: window.clone()
-        });
-
-        view
+    fn refresh_commit_history(&self) {
+        self.history_view.refresh_commit_history();
     }
     
     fn handle_error(&self, error: impl fmt::Display) {
@@ -191,6 +197,23 @@ impl BranchViewable for BranchView {
 }
 
 impl BranchView {
+    pub fn new(window: &gtk::Window, repo: Rc<git2::Repository>) -> Rc<BranchView> {
+        let presenter = Rc::new(BranchPresenter::new(repo));
+
+        let (history_view, files_view, diff_view, root) = BranchView::create(Rc::downgrade(&presenter));
+
+        let view = view!(BranchView {
+            presenter: Rc::clone(&presenter),
+            history_view, 
+            files_view,
+            diff_view,
+            root: root,
+            window: window.clone()
+        });
+
+        view
+    }
+
     fn create(parent: Weak<BranchPresenter<BranchView>>) -> (Rc<HistoryView>, Rc<FileStatusView>, DiffView, gtk::Paned) {
         let commit_history = HistoryView::new(parent.clone());
         let files_view = FileStatusView::new(parent.clone());

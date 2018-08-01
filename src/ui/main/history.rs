@@ -35,6 +35,7 @@ pub trait HistoryViewable {
     fn set_history(&self, commits: &[CommitInfo]);
     fn selected_row(&self) -> Option<usize>;
     fn handle_error(&self, error: impl fmt::Display);
+    fn refresh_commit_history(&self);
 }
 
 struct HistoryPresenter<V> {
@@ -144,7 +145,7 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
         };
 
         let parent = self.parent();
-        if path.ends_with("index") || path.ends_with(&parent.branch()) || !path.components().any(|x| x.as_os_str() == ".git") {
+        if path.ends_with("index") || path.ends_with(&*parent.branch().borrow()) || !path.components().any(|x| x.as_os_str() == ".git") {
             self.update_commit_history();
             if let Some(idx) = self.view().selected_row() {
                 self.on_item_selected(idx);
@@ -172,7 +173,7 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
 
     pub fn update_commit_history(&self) {
         let parent = self.parent();
-        let branch = &parent.repo().find_branch(&self.parent().branch(), git2::BranchType::Local).expect("find branch");
+        let branch = &parent.repo().find_branch(&parent.branch().borrow(), git2::BranchType::Local).expect("find branch");
         let refr = branch.get().name().expect("find branch name as ref");
 
         let revwalk = {
@@ -351,6 +352,10 @@ impl HistoryViewable for HistoryView {
         view.presenter.start();
         
         view
+    }
+
+    fn refresh_commit_history(&self) {
+        self.presenter.update_commit_history();
     }
 
     fn handle_error(&self, error: impl fmt::Display) {
