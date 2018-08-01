@@ -164,10 +164,22 @@ impl DiffChunkView {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.get_style_context().unwrap().add_class("tree-border");
 
+        let header_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        header_box.get_style_context().unwrap().add_class("diff-header");
+
         let label = gtk::Label::new(header.trim());
         label.set_xalign(0.0);
+        label.set_hexpand(true);
         label.get_style_context().unwrap().add_class("diff-label");
         label.set_ellipsize(pango::EllipsizeMode::Middle);
+        
+        let button = gtk::Button::new_with_label("Reverse Hunk");
+        button.get_style_context().unwrap().add_class("small-button");
+
+        header_box.add(&label);
+        header_box.add(&button);
+
+        root.add(&header_box);
 
         let count_tree = gtk::TreeView::new();
         count_tree.get_style_context().unwrap().add_class("line-count");
@@ -195,7 +207,6 @@ impl DiffChunkView {
         scroller.set_hexpand(true);
         trees_box.add(&scroller);
 
-        root.add(&label);
         root.add(&trees_box);
 
         fn append_column(tree: &gtk::TreeView, id: i32, title: &str, is_colored: bool) -> gtk::TreeViewColumn {

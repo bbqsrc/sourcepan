@@ -15,9 +15,7 @@
 }
 
 .diff-label {
-    padding: 8px;
     padding-left: 52px;
-    border-bottom: 1px solid #ccc;
 }
 
 .file-border {
@@ -38,7 +36,20 @@
     padding-bottom: 8px;
 }
 
+.diff-header {
+    border-bottom: 1px solid #ccc;
+    padding: 8px 4px;
+}
+
 .line-count {
     font-size: 80%;
     color: #999;
+}
+
+.small-button {
+    font-size: 85%;
+    min-height: 1px;
+    min-width: 1px;
+    padding: 2px 4px;
+    margin: 0 2px;
 }
