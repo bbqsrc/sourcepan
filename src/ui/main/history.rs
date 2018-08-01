@@ -167,21 +167,23 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
 
     fn has_uncommitted_changes(&self) -> bool {
         let parent = self.parent();
-        let statuses = parent.repo().statuses(None).unwrap();
+        let repo = parent.repo();
+        let statuses = repo.statuses(None).unwrap();
         statuses.iter().filter(|x| !x.status().is_ignored()).count() > 0
     }
 
     pub fn update_commit_history(&self) {
         let parent = self.parent();
-        let branch = &parent.repo().find_branch(&parent.branch().borrow(), git2::BranchType::Local).expect("find branch");
+        let repo = parent.repo();
+        let branch = repo.find_branch(&parent.branch().borrow(), git2::BranchType::Local).expect("find branch");
         let refr = branch.get().name().expect("find branch name as ref");
 
         let revwalk = {
-            let mut revwalk = (&parent.repo()).revwalk().expect("get a revwalk");
+            let mut revwalk = repo.revwalk().expect("get a revwalk");
             revwalk.push_head().expect("head can be pushed");
             let first_commit = revwalk.next().unwrap().unwrap();
 
-            let mut revwalk = (&parent.repo()).revwalk().expect("get a revwalk");
+            let mut revwalk = repo.revwalk().expect("get a revwalk");
             let mut sort = git2::Sort::TIME;
             sort.insert(git2::Sort::TOPOLOGICAL);
             revwalk.set_sorting(sort);
@@ -199,7 +201,8 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
             infos.push(CommitInfo::uncommitted_sentinel());
         }
 
-        let branches: Vec<(String, git2::Commit)> = parent.repo().branches(None).unwrap()
+        let repo = parent.repo();
+        let branches: Vec<(String, git2::Commit)> = repo.branches(None).unwrap()
             .map(|branch| {
                 let branch = branch.unwrap().0;
                 let name = branch.name().unwrap().unwrap().to_string();
@@ -214,7 +217,7 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
                 Err(_) => continue
             };
 
-            let commit = parent.repo().find_commit(rev).expect("commit to be found");
+            let commit = repo.find_commit(rev).expect("commit to be found");
             
             let branch_heads: Vec<String> = branches.iter()
                 .filter(|(_, tip_commit)| tip_commit.id() == commit.id())

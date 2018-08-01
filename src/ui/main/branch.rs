@@ -31,7 +31,7 @@ use ui::AsMessageDialog;
 
 pub struct BranchPresenter<V> {
     view: RefCell<Weak<V>>,
-    repo: Rc<git2::Repository>,
+    repo: RefCell<Rc<git2::Repository>>,
     deltas: RefCell<(Vec<TreeItem>, Vec<TreeItem>)>,
     branch: RefCell<String>
 }
@@ -48,14 +48,14 @@ impl<V: BranchViewable> BranchPresenter<V> {
 
         BranchPresenter {
             view: RefCell::new(Weak::new()),
-            repo: repo,
+            repo: RefCell::new(repo),
             deltas: RefCell::new((vec![], vec![])),
             branch: RefCell::new(branch)
         }
     }
 
-    pub fn repo(&self) -> &git2::Repository {
-        &self.repo
+    pub fn repo(&self) -> Rc<git2::Repository> {
+        self.repo.borrow().clone()
     }
 
     pub fn deltas(&self) -> &RefCell<(Vec<TreeItem>, Vec<TreeItem>)> {
@@ -72,17 +72,33 @@ impl<V: BranchViewable> BranchPresenter<V> {
         self.view().refresh_commit_history();
     }
 
+    pub fn set_repo(&self, repo: Rc<git2::Repository>) {
+        let branch = {
+            let repo = repo.clone();
+            let first_branch = repo.branches(None).unwrap()
+                .next().unwrap().unwrap();
+            first_branch.0.name().unwrap().unwrap()
+                .to_string()
+        };
+
+        *self.branch.borrow_mut() = branch;
+        *self.repo.borrow_mut() = repo;
+
+        self.view().refresh_commit_history();
+    }
+
     pub fn on_uncommitted_changes_selected(&self) {
-        let repo_head_tree = self.repo.head().unwrap().peel_to_tree().unwrap();
+        let repo = self.repo.borrow();
+        let repo_head_tree = repo.head().unwrap().peel_to_tree().unwrap();
         let mut diff_opts = git2::DiffOptions::new();
         diff_opts
             .include_untracked(true)
             .recurse_untracked_dirs(true);
 
-        let mut workdir_diff = self.repo.diff_tree_to_workdir_with_index(Some(&repo_head_tree), Some(&mut diff_opts)).unwrap();
+        let mut workdir_diff = repo.diff_tree_to_workdir_with_index(Some(&repo_head_tree), Some(&mut diff_opts)).unwrap();
         workdir_diff.find_similar(None).unwrap();
 
-        let mut index_diff = self.repo.diff_tree_to_index(Some(&repo_head_tree), None, None).unwrap();
+        let mut index_diff = repo.diff_tree_to_index(Some(&repo_head_tree), None, None).unwrap();
         index_diff.find_similar(None).unwrap();
 
         let index_deltas: Vec<TreeItem> = index_diff.deltas().map(|d| {
@@ -112,7 +128,8 @@ impl<V: BranchViewable> BranchPresenter<V> {
     }
 
     pub fn on_commit_selected<'a>(&self, info: &CommitInfo) {
-        let commit = self.repo.find_commit(info.id).expect("Commit to exist in repo");
+        let repo = self.repo.borrow();
+        let commit = repo.find_commit(info.id).expect("Commit to exist in repo");
         let parent_commits: Vec<git2::Commit> = commit.parents().collect();
 
         let maybe_parent = parent_commits.first().map(|x| x.tree().unwrap());
@@ -121,7 +138,7 @@ impl<V: BranchViewable> BranchPresenter<V> {
             None => None
         };
 
-        let mut diff = self.repo.diff_tree_to_tree(
+        let mut diff = repo.diff_tree_to_tree(
             parent,
             Some(&commit.tree().unwrap()),
             None
@@ -154,6 +171,7 @@ pub trait BranchViewable {
     fn set_overview_statuses(&self, statuses: &[TreeItem], commit: &git2::Commit);
     fn set_statuses(&self, staged: &[TreeItem], unstaged: &[TreeItem]);
     fn set_diff(&self, diff: git2::Diff);
+    fn set_repo(&self, repo: Rc<git2::Repository>);
     fn set_branch(&self, branch: &str);
     fn refresh_commit_history(&self);
 }
@@ -171,6 +189,10 @@ pub struct BranchView {
 impl BranchViewable for BranchView {
     fn set_branch(&self, branch: &str) {
         self.presenter.set_branch(branch);
+    }
+
+    fn set_repo(&self, repo: Rc<git2::Repository>) {
+        self.presenter.set_repo(repo);
     }
 
     fn refresh_commit_history(&self) {

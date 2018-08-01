@@ -231,6 +231,7 @@ impl MainViewable for MainWindow {
     }
     
     fn set_branches(&self, repo: Rc<git2::Repository>, branches: Vec<String>) {
+        self.branch_view.set_repo(repo);
         self.branch_view.set_branch(&branches[0]);
         self.sidebar_view.set_branches(&branches);
 
