@@ -189,6 +189,11 @@ impl DiffChunkView {
         lines_tree.get_style_context().unwrap().add_class("monospace");
         lines_tree.get_selection().set_mode(gtk::SelectionMode::Multiple);
 
+        lines_tree.connect_focus_out_event(|tree, _| {
+            tree.get_selection().unselect_all();
+            gtk::Inhibit(false)
+        });
+
         let list_store = gtk::ListStore::new(&[
             gdk::RGBA::static_type(),
             String::static_type(),
