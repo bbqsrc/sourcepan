@@ -53,3 +53,8 @@
     padding: 2px 4px;
     margin: 0 2px;
 }
+
+treeview.view :selected:not(:focus) {
+    background-color: #ddd;
+    color: black;
+}
