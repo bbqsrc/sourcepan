@@ -256,4 +256,9 @@ impl BranchView {
     pub fn widget(&self) -> &gtk::Paned {
         &self.root
     }
+
+    pub fn set_file_pane_to_half(&self) {
+        let height = self.files_view.widget().get_allocated_height();
+        self.files_view.widget().set_position(height / 9 * 4);
+    }
 }

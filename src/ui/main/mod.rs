@@ -221,6 +221,9 @@ impl MainViewable for MainWindow {
 
         view.presenter.start();
 
+        // Hack to make the pane be at 50% on first load
+        view.branch_view.set_file_pane_to_half();
+
         view
     }
 
