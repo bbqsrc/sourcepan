@@ -277,34 +277,34 @@ impl MainWindow {
         header_bar.set_title("Sourcepan");
         header_bar.set_show_close_button(true);
 
-        let commit_button = gtk::Button::new_with_label("Commit");
+        // let commit_button = gtk::Button::new_with_label("Commit");
 
-        let action_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        action_box.get_style_context().unwrap().add_class("linked");
+        // let action_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        // action_box.get_style_context().unwrap().add_class("linked");
 
-        let pull_button = gtk::Button::new_with_label("Pull");
-        let push_button = gtk::Button::new_with_label("Push");
-        let fetch_button = gtk::Button::new_with_label("Fetch");
+        // let pull_button = gtk::Button::new_with_label("Pull");
+        // let push_button = gtk::Button::new_with_label("Push");
+        // let fetch_button = gtk::Button::new_with_label("Fetch");
 
-        action_box.add(&pull_button);
-        action_box.add(&push_button);
-        action_box.add(&fetch_button);
+        // action_box.add(&pull_button);
+        // action_box.add(&push_button);
+        // action_box.add(&fetch_button);
 
-        let action_box2 = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        action_box2.get_style_context().unwrap().add_class("linked");
+        // let action_box2 = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        // action_box2.get_style_context().unwrap().add_class("linked");
 
-        let branch_button = gtk::Button::new_with_label("Branch");
-        let merge_button = gtk::Button::new_with_label("Merge");
+        // let branch_button = gtk::Button::new_with_label("Branch");
+        // let merge_button = gtk::Button::new_with_label("Merge");
 
-        action_box2.add(&branch_button);
-        action_box2.add(&merge_button);
+        // action_box2.add(&branch_button);
+        // action_box2.add(&merge_button);
 
-        header_bar.pack_start(&commit_button);
-        header_bar.pack_start(&action_box);
-        header_bar.pack_start(&action_box2);
+        // header_bar.pack_start(&commit_button);
+        // header_bar.pack_start(&action_box);
+        // header_bar.pack_start(&action_box2);
 
-        let stash_button = gtk::Button::new_with_label("Stash");
-        header_bar.pack_start(&stash_button);
+        // let stash_button = gtk::Button::new_with_label("Stash");
+        // header_bar.pack_start(&stash_button);
 
         let settings_button = gtk::Button::new_with_label("Preferences");
         header_bar.pack_end(&settings_button);
