@@ -54,7 +54,7 @@
     margin: 0 2px;
 }
 
-treeview.view :selected:not(:focus) {
+treeview.view:not(:focus) :selected {
     background-color: #ddd;
     color: black;
 }
