@@ -14,6 +14,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::cell::RefCell;
+use std::sync::{Arc, RwLock};
 
 use git2;
 use gtk::prelude::*;
@@ -194,17 +195,9 @@ impl DiffChunkView {
             gtk::Inhibit(false)
         });
 
-        lines_tree.connect_button_press_event(|_, _| {
-            // TODO: capture first clicked row path
-            gtk::Inhibit(false)
-        });
+        let first_clicked: Arc<RwLock<Option<gtk::TreePath>>> = Arc::new(RwLock::new(None)); 
 
-        lines_tree.connect_motion_notify_event(|_, _| {
-            // TODO: capture each movement and select hovered row
-            gtk::Inhibit(false)
-        });
-
-        lines_tree.connect_button_release_event(|tree, event| {
+        lines_tree.connect_button_press_event(clone!(first_clicked => move |tree, event| {
             let (x, y) = event.get_position();
             let res = match tree.get_path_at_pos(x as i32, y as i32) {
                 Some(v) => v,
@@ -215,11 +208,42 @@ impl DiffChunkView {
                 None => { return gtk::Inhibit(false); }
             };
 
-            let selected = &tree.get_selection().get_selected_rows().0[0];
-            tree.get_selection().select_range(&selected, &path);
-            
+            let mut guard = first_clicked.write().unwrap();
+            *guard = Some(path);
             gtk::Inhibit(false)
-        });
+        }));
+
+        lines_tree.connect_motion_notify_event(clone!(first_clicked => move |tree, event| {
+            let lock = first_clicked.read().unwrap();
+            let tree_path = match &*lock {
+                Some(v) => v,
+                None => {
+                    return gtk::Inhibit(false);
+                }
+            };
+
+            let (x, y) = event.get_position();
+            let res = match tree.get_path_at_pos(x as i32, y as i32) {
+                Some(v) => v,
+                None => { return gtk::Inhibit(false); }
+            };
+            let new_path = match res.0 {
+                Some(v) => v,
+                None => { return gtk::Inhibit(false); }
+            };
+
+            let selection = tree.get_selection();
+            selection.unselect_all();
+            selection.select_range(&tree_path, &new_path);
+            gtk::Inhibit(false)
+        }));
+
+        lines_tree.connect_button_release_event(clone!(first_clicked => move |_, _| {
+            let mut guard = first_clicked.write().unwrap();
+            *guard = None;
+
+            gtk::Inhibit(false)
+        }));
 
         let list_store = gtk::ListStore::new(&[
             gdk::RGBA::static_type(),
