@@ -194,6 +194,33 @@ impl DiffChunkView {
             gtk::Inhibit(false)
         });
 
+        lines_tree.connect_button_press_event(|_, _| {
+            // TODO: capture first clicked row path
+            gtk::Inhibit(false)
+        });
+
+        lines_tree.connect_motion_notify_event(|_, _| {
+            // TODO: capture each movement and select hovered row
+            gtk::Inhibit(false)
+        });
+
+        lines_tree.connect_button_release_event(|tree, event| {
+            let (x, y) = event.get_position();
+            let res = match tree.get_path_at_pos(x as i32, y as i32) {
+                Some(v) => v,
+                None => { return gtk::Inhibit(false); }
+            };
+            let path = match res.0 {
+                Some(v) => v,
+                None => { return gtk::Inhibit(false); }
+            };
+
+            let selected = &tree.get_selection().get_selected_rows().0[0];
+            tree.get_selection().select_range(&selected, &path);
+            
+            gtk::Inhibit(false)
+        });
+
         let list_store = gtk::ListStore::new(&[
             gdk::RGBA::static_type(),
             String::static_type(),
