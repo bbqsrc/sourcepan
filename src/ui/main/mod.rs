@@ -82,7 +82,6 @@ struct MainPresenter<V> {
 }
 
 pub trait MainViewable {
-    fn with_repo(repo: git2::Repository) -> Rc<Self>;
     fn set_branches(&self, repo: Rc<git2::Repository>, branches: Vec<String>);
     fn set_branch_by_index(&self, index: usize);
     fn show(&self);
@@ -160,73 +159,19 @@ pub struct MainWindow {
 
 impl Window for MainWindow {}
 
-impl MainViewable for MainWindow {
-    fn with_repo(repo: git2::Repository) -> Rc<Self> {
-        let window = gtk::Window::new(gtk::WindowType::Toplevel);
-        window.set_title("Sourcepan");
-        window.set_default_size(1024, 768);
+pub enum MainWindowError {
+    NoBranches
+}
 
-        let header = MainWindow::create_header();
-        window.set_titlebar(header.widget());
-
-        let sidebar_view = MainWindow::create_sidebar();
-
-        window.add(&sidebar_view.root);
-
-        window.connect_delete_event(|_, _| {
-            gtk::main_quit();
-            Inhibit(false)
-        });
-
-        let repo = Rc::new(repo);
-        let branch_view = BranchView::new(&window, Rc::clone(&repo));
-        sidebar_view.root.add2(branch_view.widget());
-
-        let view = view!(MainWindow {
-            presenter: MainPresenter::new(Rc::clone(&repo)),
-            header,
-            window,
-            sidebar_view: Rc::new(sidebar_view),
-            branch_view,
-            branches: RefCell::new(vec![])
-        });
-        
-        view.header.open_button.connect_clicked(weak!(view => move |_| {
-            if let Some(view) = view.upgrade() {
-                view.presenter.open_clicked();
-            } else {
-                panic!("MainWindow open_button failed to resolve weak parent view");
-            }
-        }));
-
-        {
-            // let sidebar_view = &view.sidebar_view;
-            view.sidebar_view.tree_view.connect_cursor_changed(weak!(view => move |_| {
-                if let Some(view) = view.upgrade() {
-                    let idxs = view.sidebar_view.tree_view.get_cursor().0.unwrap().get_indices();
-                    if idxs.len() < 2 {
-                        return;
-                    }
-
-                    let branch_idx = idxs[1];
-
-                    if branch_idx >= 0 {
-                        view.set_branch_by_index(branch_idx as usize);
-                    }
-                } else {
-                    panic!("Sidebar not found in weak reference counter for tree selection");
-                }
-            }));
+impl fmt::Display for MainWindowError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            MainWindowError::NoBranches => write!(f, "No branches found in given repository.")
         }
-
-        view.presenter.start();
-
-        // Hack to make the pane be at 50% on first load
-        view.branch_view.set_file_pane_to_half();
-
-        view
     }
+}
 
+impl MainViewable for MainWindow {
     fn handle_error(&self, error: impl fmt::Display) {
         let dialog = error.as_message_dialog(Some(&self.window));
         dialog.run();
@@ -312,6 +257,88 @@ impl SidebarView {
 }
 
 impl MainWindow {
+    pub fn with_repo(repo: git2::Repository) -> Result<Rc<Self>, MainWindowError> {
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.set_title("Sourcepan");
+        window.set_default_size(1024, 768);
+
+        let header = MainWindow::create_header();
+        window.set_titlebar(header.widget());
+
+        let sidebar_view = MainWindow::create_sidebar();
+
+        window.add(&sidebar_view.root);
+
+        window.connect_delete_event(|_, _| {
+            gtk::main_quit();
+            Inhibit(false)
+        });
+
+        let repo = Rc::new(repo);
+        let initial_branch = {
+            let repo = repo.clone();
+            let mut branches = repo.branches(None).unwrap();
+            let maybe_first_branch = branches.next();
+            let maybe_first_branch = match maybe_first_branch {
+                Some(v) => v,
+                None => return Err(MainWindowError::NoBranches)
+            };
+            let first_branch = match maybe_first_branch {
+                Ok(v) => v,
+                Err(_) => return Err(MainWindowError::NoBranches)
+            };
+            first_branch.0.name().unwrap().unwrap()
+                .to_string()
+        };
+        
+        let branch_view = BranchView::new(&window, Rc::clone(&repo), initial_branch);
+        sidebar_view.root.add2(branch_view.widget());
+
+        let view = view!(MainWindow {
+            presenter: MainPresenter::new(Rc::clone(&repo)),
+            header,
+            window,
+            sidebar_view: Rc::new(sidebar_view),
+            branch_view,
+            branches: RefCell::new(vec![])
+        });
+        
+        view.header.open_button.connect_clicked(weak!(view => move |_| {
+            if let Some(view) = view.upgrade() {
+                view.presenter.open_clicked();
+            } else {
+                panic!("MainWindow open_button failed to resolve weak parent view");
+            }
+        }));
+
+        {
+            // let sidebar_view = &view.sidebar_view;
+            view.sidebar_view.tree_view.connect_cursor_changed(weak!(view => move |_| {
+                if let Some(view) = view.upgrade() {
+                    let idxs = view.sidebar_view.tree_view.get_cursor().0.unwrap().get_indices();
+                    if idxs.len() < 2 {
+                        return;
+                    }
+
+                    let branch_idx = idxs[1];
+
+                    if branch_idx >= 0 {
+                        view.set_branch_by_index(branch_idx as usize);
+                    }
+                } else {
+                    panic!("Sidebar not found in weak reference counter for tree selection");
+                }
+            }));
+        }
+
+        view.presenter.start();
+
+        // Hack to make the pane be at 50% on first load
+        view.branch_view.set_file_pane_to_half();
+
+        Ok(view)
+    }
+
     fn create_sidebar() -> SidebarView {
         let tree_store = gtk::TreeStore::new(&[
             String::static_type()

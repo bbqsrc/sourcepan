@@ -190,8 +190,11 @@ impl<V: HistoryViewable> HistoryPresenter<V> where V: 'static {
             revwalk.set_sorting(sort);
             revwalk.push_ref(refr).expect("push ref successfully");
             revwalk.push(first_commit).unwrap();
-            revwalk.push_glob("heads/*").unwrap();
-            revwalk.push_glob("remotes/*").unwrap();
+
+            // These two may fail if the directories for them do not exist, so we unwrap and ignore.
+            revwalk.push_glob("heads/*").unwrap_or(());
+            revwalk.push_glob("remotes/*").unwrap_or(());
+            
             revwalk
         };
 

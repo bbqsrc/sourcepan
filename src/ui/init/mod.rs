@@ -23,7 +23,7 @@ use gtk::prelude::*;
 use gtk;
 
 use ui::Window;
-use ui::main::{MainViewable, MainWindow};
+use ui::main::{MainViewable, MainWindow, MainWindowError};
 use ui::AsMessageDialog;
 
 struct InitPresenter<V: InitViewable> {
@@ -56,7 +56,13 @@ impl<V: InitViewable> InitPresenter<V> {
             }
         };
 
-        self.view().open_main_window_with(repo);
+        match self.view().open_main_window_with(repo) {
+            Ok(_) => {},
+            Err(err) => {
+                self.view().handle_error(err);
+                return;
+            }
+        }
 
         Config::set_repo_dir(&repo_dir.to_string_lossy());
     }
@@ -67,7 +73,7 @@ pub trait InitViewable {
     fn show(&self);
     fn hide(&self);
     fn open_repo_selector(&self);
-    fn open_main_window_with(&self, repo: git2::Repository);
+    fn open_main_window_with(&self, repo: git2::Repository) -> Result<(), MainWindowError>;
     fn handle_error(&self, error: impl fmt::Display);
 }
 
@@ -122,6 +128,8 @@ impl InitViewable for InitWindow {
         let dialog = error.as_message_dialog(Some(&self.window));
         dialog.run();
         dialog.destroy();
+
+        self.show();
     }
 
     fn show(&self) {
@@ -149,12 +157,13 @@ impl InitViewable for InitWindow {
         }
     }
 
-    fn open_main_window_with(&self, repo: git2::Repository) {
+    fn open_main_window_with(&self, repo: git2::Repository) -> Result<(), MainWindowError> {
         self.hide();
-        let main_window = MainWindow::with_repo(repo);
+        let main_window = MainWindow::with_repo(repo)?;
         main_window.show();
 
         // TODO: remove this terrible hack; use a window mgr
         *self.main_window.borrow_mut() = Some(main_window);
+        Ok(())
     }
 }

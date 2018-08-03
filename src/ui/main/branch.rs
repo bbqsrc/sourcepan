@@ -37,20 +37,12 @@ pub struct BranchPresenter<V> {
 }
 
 impl<V: BranchViewable> BranchPresenter<V> {
-    fn new(repo: Rc<git2::Repository>) -> BranchPresenter<V> {
-         let branch = {
-            let repo = repo.clone();
-            let first_branch = repo.branches(None).unwrap()
-                .next().unwrap().unwrap();
-            first_branch.0.name().unwrap().unwrap()
-                .to_string()
-        };
-
-        BranchPresenter {
+    fn new(repo: Rc<git2::Repository>, initial_branch: String) -> BranchPresenter<V> {
+         BranchPresenter {
             view: RefCell::new(Weak::new()),
             repo: RefCell::new(repo),
             deltas: RefCell::new((vec![], vec![])),
-            branch: RefCell::new(branch)
+            branch: RefCell::new(initial_branch)
         }
     }
 
@@ -219,8 +211,8 @@ impl BranchViewable for BranchView {
 }
 
 impl BranchView {
-    pub fn new(window: &gtk::Window, repo: Rc<git2::Repository>) -> Rc<BranchView> {
-        let presenter = Rc::new(BranchPresenter::new(repo));
+    pub fn new(window: &gtk::Window, repo: Rc<git2::Repository>, initial_branch: String) -> Rc<BranchView> {
+        let presenter = Rc::new(BranchPresenter::new(repo, initial_branch));
 
         let (history_view, files_view, diff_view, root) = BranchView::create(Rc::downgrade(&presenter));
 

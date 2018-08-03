@@ -53,10 +53,10 @@ impl Config {
     }
 }
 
-fn create_main_window(repo: git2::Repository) -> Rc<ui::main::MainWindow> {
-    let main_window = ui::main::MainWindow::with_repo(repo);
+fn create_main_window(repo: git2::Repository) -> Result<Rc<ui::main::MainWindow>, ui::main::MainWindowError> {
+    let main_window = ui::main::MainWindow::with_repo(repo)?;
     main_window.show();
-    main_window
+    Ok(main_window)
 }
 
 fn create_init_window() -> Rc<ui::init::InitWindow> {
@@ -84,7 +84,10 @@ fn main() {
     // Holds a strong reference to the primary window to stop some *fun* UB
     let _window: Rc<ui::Window> = if let Some(repo_dir) = Config::repo_dir() {
         match git2::Repository::open(&repo_dir) {
-            Ok(repo) => create_main_window(repo),
+            Ok(repo) => match create_main_window(repo) {
+                Ok(w) => w,
+                Err(_) => create_init_window()
+            }
             Err(_) => create_init_window()
         }
     } else {
