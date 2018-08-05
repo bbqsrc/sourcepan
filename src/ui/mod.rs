@@ -15,6 +15,8 @@
 
 #![macro_use]
 
+use std::rc::Rc;
+
 use gtk;
 
 macro_rules! view {
@@ -61,6 +63,38 @@ macro_rules! weak {
     );
 }
 
+macro_rules! try_upgrade {
+    ($n:expr, $e:expr) => {
+        match $n.upgrade() {
+            Some(v) => v,
+            None => return $e
+        }
+    };
+
+    ($n:expr) => {
+        match $n.upgrade() {
+            Some(v) => v,
+            None => return
+        }
+    }
+}
+
+macro_rules! try_unwrap {
+    ($n:expr, $e:expr) => {
+        match $n {
+            Some(v) => v,
+            None => return $e
+        }
+    };
+
+    ($n:expr) => {
+        match $n {
+            Some(v) => v,
+            None => return
+        }
+    }
+}
+
 use std::fmt;
 use gtk::prelude::*;
 
@@ -84,6 +118,12 @@ impl<T: fmt::Display> AsMessageDialog for T {
 }
 
 pub trait Window {}
+
+pub trait Parent {
+    type View;
+
+    fn parent(&self) -> Option<Rc<Self::View>>;
+}
 
 pub mod init;
 pub mod main;

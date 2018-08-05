@@ -27,6 +27,7 @@ use super::diff::DiffView;
 use super::CommitInfo;
 
 use ui::main::TreeItem;
+use ui::main::diff::DiffContext;
 use ui::AsMessageDialog;
 
 pub struct BranchPresenter<V> {
@@ -114,7 +115,7 @@ impl<V: BranchViewable> BranchPresenter<V> {
         .collect();
 
         self.view().set_statuses(&index_deltas, &workdir_deltas);
-        self.view().set_diff(index_diff);
+        self.view().set_diff(index_diff, DiffContext::Staged);
 
         *self.deltas.borrow_mut() = (index_deltas, workdir_deltas);
     }
@@ -148,7 +149,7 @@ impl<V: BranchViewable> BranchPresenter<V> {
         }).collect();
 
         self.view().set_overview_statuses(&deltas, &commit);
-        self.view().set_diff(diff);
+        self.view().set_diff(diff, DiffContext::Committed);
     }
 
     pub fn view(&self) -> Rc<V> {
@@ -162,7 +163,7 @@ pub trait BranchViewable {
     fn handle_error(&self, error: impl fmt::Display);
     fn set_overview_statuses(&self, statuses: &[TreeItem], commit: &git2::Commit);
     fn set_statuses(&self, staged: &[TreeItem], unstaged: &[TreeItem]);
-    fn set_diff(&self, diff: git2::Diff);
+    fn set_diff(&self, diff: git2::Diff, context: DiffContext);
     fn set_repo(&self, repo: Rc<git2::Repository>);
     fn set_branch(&self, branch: &str);
     fn refresh_commit_history(&self);
@@ -173,7 +174,7 @@ pub struct BranchView {
     presenter: Rc<BranchPresenter<BranchView>>,
     history_view: Rc<HistoryView>,
     files_view: Rc<FileStatusView>,
-    diff_view: DiffView,
+    diff_view: Rc<DiffView>,
     root: gtk::Paned,
     window: gtk::Window
 }
@@ -205,8 +206,8 @@ impl BranchViewable for BranchView {
         self.files_view.presenter.set_overview_statuses(statuses, commit);
     }
 
-    fn set_diff(&self, diff: git2::Diff) {
-        self.diff_view.set_diff(diff);
+    fn set_diff(&self, diff: git2::Diff, context: DiffContext) {
+        DiffView::set_diff(&self.diff_view, diff, context);
     }
 }
 
@@ -228,10 +229,10 @@ impl BranchView {
         view
     }
 
-    fn create(parent: Weak<BranchPresenter<BranchView>>) -> (Rc<HistoryView>, Rc<FileStatusView>, DiffView, gtk::Paned) {
+    fn create(parent: Weak<BranchPresenter<BranchView>>) -> (Rc<HistoryView>, Rc<FileStatusView>, Rc<DiffView>, gtk::Paned) {
         let commit_history = HistoryView::new(parent.clone());
         let files_view = FileStatusView::new(parent.clone());
-        let diff_view = DiffView::new();
+        let diff_view = Rc::new(DiffView::new());
 
         let main_pane = gtk::Paned::new(gtk::Orientation::Vertical);
         let bottom_pane = gtk::Paned::new(gtk::Orientation::Horizontal);

@@ -14,6 +14,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 use std::sync::{Arc, RwLock};
 
 use git2;
@@ -22,33 +23,15 @@ use gtk;
 use gdk;
 use pango;
 
+use ui;
+use ui::Parent;
+
 const NO_NL_STR: &'static str = "No newline at end of file";
-
-trait DiffViewable {
-
-}
-
-trait DiffChunkViewable {
-
-}
-
-#[allow(dead_code)]
-pub struct DiffChunkView {
-    list_store: gtk::ListStore,
-    label: gtk::Label,
-    lines_tree: gtk::TreeView,
-    count_tree: gtk::TreeView,
-    root: gtk::Box
-}
-
-impl DiffChunkViewable for DiffChunkView {
-
-}
 
 pub struct DiffView {
     root: gtk::ScrolledWindow,
     container: gtk::Box,
-    files: RefCell<Vec<DiffFileView>>
+    files: RefCell<Vec<Rc<DiffFileView>>>
 }
 
 impl DiffView {
@@ -67,9 +50,9 @@ impl DiffView {
         }
     }
 
-    pub fn set_diff(&self, diff: git2::Diff) {
-        for child in self.container.get_children() {
-            self.container.remove(&child);
+    pub fn set_diff(view: &Rc<DiffView>, diff: git2::Diff, context: DiffContext) {
+        for child in view.container.get_children() {
+            view.container.remove(&child);
         }
 
         let mut views = vec![];
@@ -78,14 +61,14 @@ impl DiffView {
             let mut patch = git2::Patch::from_diff(&diff, n).unwrap().unwrap();
             let path = d.new_file().path().unwrap().to_string_lossy();
 
-            let view = DiffFileView::new(patch, &path);
-            self.container.add(view.widget());
-            views.push(view);
+            let file_view = DiffFileView::new(Rc::downgrade(&view), context, patch, &path);
+            view.container.add(file_view.widget());
+            views.push(file_view);
         }
 
-        *self.files.borrow_mut() = views;
+        *view.files.borrow_mut() = views;
 
-        self.container.show_all();
+        view.container.show_all();
     }
 
     pub fn widget(&self) -> &gtk::ScrolledWindow {
@@ -94,13 +77,23 @@ impl DiffView {
 }
 
 #[allow(dead_code)]
-struct DiffFileView {
+pub struct DiffFileView {
     root: gtk::Box,
-    label: gtk::Label
+    label: gtk::Label,
+    parent: Weak<DiffView>,
+    children: RefCell<Vec<Rc<DiffChunkView>>>
+}
+
+impl ui::Parent for DiffFileView {
+    type View = DiffView;
+
+    fn parent(&self) -> Option<Rc<DiffView>> {
+        self.parent.upgrade()
+    }
 }
 
 impl DiffFileView {
-    pub fn new(patch: git2::Patch, path: &str) -> DiffFileView {
+    pub fn new(parent: Weak<DiffView>, context: DiffContext, patch: git2::Patch, path: &str) -> Rc<DiffFileView> {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.get_style_context().unwrap().add_class("file-border");
         
@@ -111,18 +104,23 @@ impl DiffFileView {
 
         root.add(&label);
 
+        let view = Rc::new(DiffFileView {
+            root,
+            label,
+            parent,
+            children: RefCell::new(vec![])
+        });
+
         for hunk_idx in 0..patch.num_hunks() {
             let hunk = patch.hunk(hunk_idx).unwrap().0;
             let header = ::std::str::from_utf8(hunk.header()).unwrap();
 
-            let chunk_view = DiffChunkView::new(&patch, header, hunk_idx);
-            root.add(chunk_view.widget());
+            let chunk_view = DiffChunkView::new(Rc::downgrade(&view), context, &patch, header, hunk_idx);
+            view.root.add(chunk_view.widget());
+            view.children.borrow_mut().push(chunk_view);
         }
 
-        DiffFileView {
-            root,
-            label
-        }
+        view
     }
 
     pub fn widget(&self) -> &gtk::Box {
@@ -160,8 +158,160 @@ impl<'a> HumanDiffLineExt<'a> for git2::DiffLine<'a> {
                 
 }
 
+#[allow(dead_code)]
+pub struct DiffChunkView {
+    presenter: DiffChunkPresenter<DiffChunkView>,
+    list_store: gtk::ListStore,
+    label: gtk::Label,
+    primary_button: gtk::Button,
+    lines_tree: gtk::TreeView,
+    count_tree: gtk::TreeView,
+    root: gtk::Box,
+    parent: Weak<DiffFileView>
+}
+
+impl ui::Parent for DiffChunkView {
+    type View = DiffFileView;
+
+    fn parent(&self) -> Option<Rc<DiffFileView>> {
+        self.parent.upgrade()
+    }
+}
+
+trait DiffChunkViewable {
+    fn show_revert_selected_lines(&self);
+    fn show_unstage_selected_lines(&self);
+    fn show_stage_selected_lines(&self);
+    fn show_revert_all_lines(&self);
+    fn show_stage_all_lines(&self);
+    fn show_unstage_all_lines(&self);
+    fn show_incontiguous_selection_error(&self);
+    fn on_primary_button_clicked(&self);
+    fn on_selected_lines(&self, rows: &[usize]);
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum DiffContext {
+    Committed,
+    Staged,
+    Working
+}
+
+struct DiffChunkPresenter<V: DiffChunkViewable> {
+    view: RefCell<Weak<V>>,
+    context: DiffContext
+}
+
+impl<V: DiffChunkViewable> DiffChunkPresenter<V> {
+    pub fn new(context: DiffContext) -> DiffChunkPresenter<V> {
+        DiffChunkPresenter { 
+            view: RefCell::new(Weak::new()),
+            context
+        }
+    }
+
+    pub fn start(&self) {
+        self.handle_on_selected_lines(&[]);
+    }
+
+    fn view(&self) -> Rc<V> {
+        self.view.borrow().upgrade().expect("The view exists")
+    }
+
+    fn handle_on_primary_button_clicked(&self) {
+        
+    }
+
+    fn handle_on_selected_lines(&self, lines: &[usize]) {
+        let has_selection = lines.len() > 0;
+        let is_contiguous = lines.windows(2).all(|s| s[1] == s[0] + 1);
+
+        match self.context {
+            DiffContext::Committed => {
+                if has_selection && is_contiguous {
+                    self.view().show_revert_selected_lines()
+                } else if !has_selection {
+                    self.view().show_revert_all_lines()
+                } else {
+                    self.view().show_incontiguous_selection_error()
+                }
+            }
+            DiffContext::Staged => {
+                if has_selection && is_contiguous {
+                    self.view().show_unstage_selected_lines()
+                } else if !has_selection {
+                    self.view().show_unstage_all_lines()
+                } else {
+                    self.view().show_incontiguous_selection_error()
+                }
+            }
+            DiffContext::Working => {
+                if has_selection && is_contiguous {
+                    self.view().show_stage_selected_lines()
+                } else if !has_selection {
+                    self.view().show_stage_all_lines()
+                } else {
+                    self.view().show_incontiguous_selection_error()
+                }
+            }
+        }
+    }
+}
+
+impl DiffChunkViewable for DiffChunkView {
+    fn show_revert_selected_lines(&self) {
+        self.primary_button.set_sensitive(true);
+        self.primary_button.set_label("Revert Selected Lines");
+        self.primary_button.show_all();
+    }
+    
+    fn show_unstage_selected_lines(&self) {
+        self.primary_button.set_sensitive(true);
+        self.primary_button.set_label("Unstage Selected Lines");
+        self.primary_button.show_all();
+    }
+    
+    fn show_stage_selected_lines(&self) {
+        self.primary_button.set_sensitive(true);
+        self.primary_button.set_label("Stage Selected Lines");
+        self.primary_button.show_all();
+    }
+    
+    fn show_revert_all_lines(&self) {
+        self.primary_button.set_sensitive(true);
+        self.primary_button.set_label("Revert All Lines");
+        self.primary_button.show_all();
+    }
+    
+    fn show_stage_all_lines(&self) {
+        self.primary_button.set_sensitive(true);
+        self.primary_button.set_label("Stage All Lines");
+        self.primary_button.show_all();
+    }
+    
+    fn show_unstage_all_lines(&self) {
+        self.primary_button.set_sensitive(true);
+        self.primary_button.set_label("Unstage All Lines");
+        self.primary_button.show_all();
+    }
+
+    fn show_incontiguous_selection_error(&self) {
+        self.primary_button.set_sensitive(false);
+        self.primary_button.set_label("Incontiguous selection");
+        self.primary_button.show_all();
+    }
+
+    fn on_primary_button_clicked(&self) {
+        self.presenter.handle_on_primary_button_clicked();
+    }
+
+    fn on_selected_lines(&self, rows: &[usize]) {
+        self.presenter.handle_on_selected_lines(&rows);
+    }
+}
+
 impl DiffChunkView {
-    pub fn new(patch: &git2::Patch, header: &str, hunk_idx: usize) -> DiffChunkView {
+    pub fn new(parent: Weak<DiffFileView>, context: DiffContext, patch: &git2::Patch, header: &str, hunk_idx: usize) -> Rc<DiffChunkView> {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.get_style_context().unwrap().add_class("tree-border");
 
@@ -174,7 +324,7 @@ impl DiffChunkView {
         label.get_style_context().unwrap().add_class("diff-label");
         label.set_ellipsize(pango::EllipsizeMode::Middle);
         
-        let button = gtk::Button::new_with_label("Reverse Hunk");
+        let button = gtk::Button::new_with_label("");
         button.get_style_context().unwrap().add_class("small-button");
 
         header_box.add(&label);
@@ -189,11 +339,6 @@ impl DiffChunkView {
         let lines_tree = gtk::TreeView::new();
         lines_tree.get_style_context().unwrap().add_class("monospace");
         lines_tree.get_selection().set_mode(gtk::SelectionMode::Multiple);
-
-        lines_tree.connect_focus_out_event(|tree, _| {
-            tree.get_selection().unselect_all();
-            gtk::Inhibit(false)
-        });
 
         let first_clicked: Arc<RwLock<Option<gtk::TreePath>>> = Arc::new(RwLock::new(None)); 
 
@@ -215,6 +360,7 @@ impl DiffChunkView {
 
         lines_tree.connect_motion_notify_event(clone!(first_clicked => move |tree, event| {
             let lock = first_clicked.read().unwrap();
+            
             let tree_path = match &*lock {
                 Some(v) => v,
                 None => {
@@ -335,13 +481,82 @@ impl DiffChunkView {
         
         root.show_all();
 
-        DiffChunkView {
+        let presenter = DiffChunkPresenter::new(context);
+
+        let view = view!(DiffChunkView {
+            presenter,
             list_store,
             label,
+            primary_button: button,
             count_tree,
             lines_tree,
-            root
-        }
+            root,
+            parent
+        });
+
+        view.lines_tree.connect_focus_out_event(weak!(view => move |_, _| {
+            let view = try_upgrade!(view, gtk::Inhibit(false));
+
+            gtk::idle_add(weak!(view => move || {
+                let view = try_upgrade!(view, gtk::Continue(false));
+                let tree = &view.lines_tree;
+
+                let top_level = match tree.get_toplevel() {
+                    Some(v) => v,
+                    None => {
+                        // TODO: warning that this isn't in window; shoudl not be possible
+                        return gtk::Continue(false);
+                    }
+                };
+
+                let window = match top_level.downcast::<gtk::Window>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        // TODO: warning that this isn't in window; shoudl not be possible
+                        return gtk::Continue(false);
+                    }
+                };
+
+                let focused_widget = match window.get_focus() {
+                    Some(v) => v,
+                    None => {
+                        tree.get_selection().unselect_all();
+                        return gtk::Continue(false);
+                    }
+                };
+
+                if !focused_widget.is_ancestor(view.widget()) {
+                    tree.get_selection().unselect_all();
+                }
+
+                gtk::Continue(false)
+            }));
+            
+            gtk::Inhibit(false)
+        }));
+
+        view.lines_tree.get_selection().connect_changed(weak!(view => move |selection| {
+            // println!("Selection changed");
+            let view = try_upgrade!(view);
+
+            // println!("View lives");
+
+            let rows: Vec<_> = selection.get_selected_rows().0
+                .into_iter()
+                .map(|x| x.get_indices()[0] as usize)
+                .collect();
+                
+            view.on_selected_lines(&rows);
+        }));
+
+        view.primary_button.connect_clicked(weak!(view => move |_| {
+            let view = try_upgrade!(view);
+            view.on_primary_button_clicked();
+        }));
+
+        view.presenter.start();
+
+        view
     }
 
     pub fn widget(&self) -> &gtk::Box {
