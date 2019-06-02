@@ -103,8 +103,8 @@ impl OverviewView {
         let label = gtk::Label::new("");
         label.set_selectable(true);
 
-        let root = gtk::ScrolledWindow::new(None, None);
-        root.get_style_context().unwrap().add_class("white-background");
+        let root = gtk::ScrolledWindow::new(gtk::NONE_ADJUSTMENT, gtk::NONE_ADJUSTMENT);
+        root.get_style_context().add_class("white-background");
         
         root.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
         root.add(&label);
@@ -281,7 +281,7 @@ impl FileListView {
 
         treeview.set_model(&list_store);
 
-        let scroller = gtk::ScrolledWindow::new(None, None);
+        let scroller = gtk::ScrolledWindow::new(gtk::NONE_ADJUSTMENT, gtk::NONE_ADJUSTMENT);
         scroller.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
         scroller.add(&treeview);
 

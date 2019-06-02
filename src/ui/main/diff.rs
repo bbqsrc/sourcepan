@@ -37,9 +37,9 @@ pub struct DiffView {
 impl DiffView {
     pub fn new() -> DiffView {
         let container = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        container.get_style_context().unwrap().add_class("diff-container");
+        container.get_style_context().add_class("diff-container");
 
-        let root = gtk::ScrolledWindow::new(None, None);
+        let root = gtk::ScrolledWindow::new(gtk::NONE_ADJUSTMENT, gtk::NONE_ADJUSTMENT);
         root.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
         root.add(&container);
 
@@ -95,12 +95,12 @@ impl ui::Parent for DiffFileView {
 impl DiffFileView {
     pub fn new(parent: Weak<DiffView>, context: DiffContext, patch: git2::Patch, path: &str) -> Rc<DiffFileView> {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.get_style_context().unwrap().add_class("file-border");
+        root.get_style_context().add_class("file-border");
         
         let label = gtk::Label::new(path);
         label.set_xalign(0.0);
         label.set_ellipsize(pango::EllipsizeMode::Middle);
-        label.get_style_context().unwrap().add_class("file-label");
+        label.get_style_context().add_class("file-label");
 
         root.add(&label);
 
@@ -313,19 +313,19 @@ impl DiffChunkViewable for DiffChunkView {
 impl DiffChunkView {
     pub fn new(parent: Weak<DiffFileView>, context: DiffContext, patch: &git2::Patch, header: &str, hunk_idx: usize) -> Rc<DiffChunkView> {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.get_style_context().unwrap().add_class("tree-border");
+        root.get_style_context().add_class("tree-border");
 
         let header_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        header_box.get_style_context().unwrap().add_class("diff-header");
+        header_box.get_style_context().add_class("diff-header");
 
         let label = gtk::Label::new(header.trim());
         label.set_xalign(0.0);
         label.set_hexpand(true);
-        label.get_style_context().unwrap().add_class("diff-label");
+        label.get_style_context().add_class("diff-label");
         label.set_ellipsize(pango::EllipsizeMode::Middle);
         
         let button = gtk::Button::new_with_label("");
-        button.get_style_context().unwrap().add_class("small-button");
+        button.get_style_context().add_class("small-button");
 
         header_box.add(&label);
         header_box.add(&button);
@@ -333,11 +333,11 @@ impl DiffChunkView {
         root.add(&header_box);
 
         let count_tree = gtk::TreeView::new();
-        count_tree.get_style_context().unwrap().add_class("line-count");
+        count_tree.get_style_context().add_class("line-count");
         count_tree.get_selection().set_mode(gtk::SelectionMode::None);
 
         let lines_tree = gtk::TreeView::new();
-        lines_tree.get_style_context().unwrap().add_class("monospace");
+        lines_tree.get_style_context().add_class("monospace");
         lines_tree.get_selection().set_mode(gtk::SelectionMode::Multiple);
 
         let first_clicked: Arc<RwLock<Option<gtk::TreePath>>> = Arc::new(RwLock::new(None)); 
@@ -403,7 +403,7 @@ impl DiffChunkView {
         let trees_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         trees_box.add(&count_tree);
 
-        let scroller = gtk::ScrolledWindow::new(None, None);
+        let scroller = gtk::ScrolledWindow::new(gtk::NONE_ADJUSTMENT, gtk::NONE_ADJUSTMENT);
         scroller.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Never);
         scroller.add(&lines_tree);
         scroller.set_hexpand(true);

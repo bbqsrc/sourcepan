@@ -386,7 +386,7 @@ impl MainWindow {
         // let commit_button = gtk::Button::new_with_label("Commit");
 
         // let action_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        // action_box.get_style_context().unwrap().add_class("linked");
+        // action_box.get_style_context().add_class("linked");
 
         // let pull_button = gtk::Button::new_with_label("Pull");
         // let push_button = gtk::Button::new_with_label("Push");
@@ -397,7 +397,7 @@ impl MainWindow {
         // action_box.add(&fetch_button);
 
         // let action_box2 = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        // action_box2.get_style_context().unwrap().add_class("linked");
+        // action_box2.get_style_context().add_class("linked");
 
         // let branch_button = gtk::Button::new_with_label("Branch");
         // let merge_button = gtk::Button::new_with_label("Merge");

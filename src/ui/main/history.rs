@@ -341,7 +341,7 @@ impl HistoryViewable for HistoryView {
         let treeview = HistoryView::create_tree(&list_store);
 
         // Make tree view scrollable
-        let root = gtk::ScrolledWindow::new(None, None);
+        let root = gtk::ScrolledWindow::new(gtk::NONE_ADJUSTMENT, gtk::NONE_ADJUSTMENT);
         root.set_hexpand(true);
         root.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
         root.add(&treeview);

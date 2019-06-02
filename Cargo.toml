@@ -5,14 +5,15 @@ authors = ["Brendan Molloy <brendan@bbqsrc.net>"]
 license = "GPL-3.0"
 
 [dependencies]
-git2 = { git = "https://github.com/bbqsrc/git2-rs", branch = "fix/unneeded-mut" }
-chrono = "0.4.5"
+#git2 = { git = "https://github.com/bbqsrc/git2-rs", branch = "fix/unneeded-mut" }
+git2 = "0.8.0"
+chrono = "0.4.6"
 preferences = "1.1.0"
-notify = "4.0.3"
-glib = "0.5.0"
-gdk = "0.8.0"
-pango = "0.4.0"
+notify = "4.0.12"
+glib = "0.7.1"
+gdk = "0.10.0"
+pango = "0.6.0"
 
 [dependencies.gtk]
-version = "0.4.1"
+version = "0.6.0"
 features = ["v3_22"]
