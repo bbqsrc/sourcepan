@@ -21,7 +21,7 @@ use git2;
 use gtk::prelude::*;
 use gtk;
 
-use ui::main::TreeItem;
+use crate::ui::main::TreeItem;
 use super::branch::{BranchPresenter, BranchView};
 
 pub trait FileStatusViewable {

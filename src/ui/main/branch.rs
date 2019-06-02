@@ -26,9 +26,9 @@ use super::history::{HistoryView, HistoryViewable};
 use super::diff::DiffView;
 use super::CommitInfo;
 
-use ui::main::TreeItem;
-use ui::main::diff::DiffContext;
-use ui::AsMessageDialog;
+use crate::ui::main::TreeItem;
+use crate::ui::main::diff::DiffContext;
+use crate::ui::AsMessageDialog;
 
 pub struct BranchPresenter<V> {
     view: RefCell<Weak<V>>,

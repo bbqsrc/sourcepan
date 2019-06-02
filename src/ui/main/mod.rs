@@ -27,9 +27,9 @@ use git2;
 use gtk::prelude::*;
 use gtk;
 
-use ui::Window;
-use ui::main::branch::{BranchViewable, BranchView};
-use ui::AsMessageDialog;
+use crate::ui::Window;
+use crate::ui::main::branch::{BranchViewable, BranchView};
+use crate::ui::AsMessageDialog;
 
 #[derive(Debug)]
 pub struct CommitInfo {
@@ -109,7 +109,7 @@ impl<V: MainViewable> MainPresenter<V> {
     }
 
     fn select_repo(&self, repo_dir: &Path) {
-        use Config;
+        use crate::Config;
 
         let repo = match git2::Repository::open(&repo_dir) {
             Ok(repo) => repo,

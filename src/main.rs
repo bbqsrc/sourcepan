@@ -29,8 +29,8 @@ use gtk::prelude::*;
 
 mod ui;
 
-use ui::init::InitViewable;
-use ui::main::MainViewable;
+use crate::ui::init::InitViewable;
+use crate::ui::main::MainViewable;
 
 const APP_INFO: AppInfo = AppInfo { name: "Sourcepan", author: "Brendan Molloy" };
 

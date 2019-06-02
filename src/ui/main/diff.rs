@@ -23,8 +23,8 @@ use gtk;
 use gdk;
 use pango;
 
-use ui;
-use ui::Parent;
+use crate::ui;
+use crate::ui::Parent;
 
 const NO_NL_STR: &'static str = "No newline at end of file";
 
@@ -58,7 +58,7 @@ impl DiffView {
         let mut views = vec![];
 
         for (n, d) in diff.deltas().enumerate() {
-            let mut patch = git2::Patch::from_diff(&diff, n).unwrap().unwrap();
+            let patch = git2::Patch::from_diff(&diff, n).unwrap().unwrap();
             let path = d.new_file().path().unwrap().to_string_lossy();
 
             let file_view = DiffFileView::new(Rc::downgrade(&view), context, patch, &path);
@@ -146,10 +146,10 @@ impl<'a> HumanDiffLineExt<'a> for git2::DiffLine<'a> {
         match ::std::str::from_utf8(self.content()) {
             Ok(v) => {
                 // Check for weird NL string
-                if v.trim_right().ends_with(NO_NL_STR) {
+                if v.trim_end().ends_with(NO_NL_STR) {
                     Some(NO_NL_STR)
                 } else {
-                    Some(v.trim_right())
+                    Some(v.trim_end())
                 }
             },
             Err(_) => None
